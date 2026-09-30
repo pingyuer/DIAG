@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.board/*.db
+.board/*.db-wal
+.board/*.db-shm
+.board/server.log
+.opencode/node_modules/
+.omp/run/
+.omp/cache/
+
+# 实验产物：只落本地盘，不进 git
+mlruns/
+outputs/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+.code_sha

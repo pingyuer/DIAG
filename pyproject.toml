@@ -1,0 +1,25 @@
+[project]
+name = "diag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { email = "tiany@tju.edu.cn" }
+]
+requires-python = ">=3.11"
+dependencies = ["mlflow>=2", "numpy", "Pillow", "torch"]
+
+[project.scripts]
+diag = "diag:main"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
