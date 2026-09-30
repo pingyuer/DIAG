@@ -108,6 +108,15 @@ def main():
         print(f"OVERFIT l0={l0:.4f}->l1={l1:.4f} d0={d0:.4f}->d1={d1:.4f}", flush=True)
         assert l1 < l0, f"loss did not fall: {l0} -> {l1}"
         assert d1 > d0, f"dice did not rise: {d0} -> {d1}"
+        ckpt = {"step": args.steps, "patient": args.patient,
+                "anchor": anchor.state_dict(), "pclf": pclf.state_dict(),
+                "hdc": hdc.state_dict(), "dec": dec.state_dict(),
+                "loss": (l0, l1), "dice": (d0, d1), "code_sha": sha}
+        out_path = Path("/root/DIAG/outputs/overfit_1clip.pt") if Path("/root/DIAG").exists \
+            else Path("outputs/overfit_1clip.pt")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(ckpt, out_path)
+        print(f"ckpt -> {out_path}", flush=True)
         print(f"DONE run={run.info.run_id}", flush=True)
 
 
