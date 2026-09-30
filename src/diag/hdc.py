@@ -139,8 +139,13 @@ class RegionTokenHead(nn.Module):
         """s: (B, C, H, W) -> region tokens (B, K, C)."""
         b, c, h, w = s.shape
         seq = s.flatten(2).transpose(1, 2)  # (B, HW, C)
-        k = self.k_proj(seq)
-        v = self.v_proj(seq)
+        # One-sided detach (003 sec.2): direct loss path into S through
+        # k/v would drag the dynamics state toward single-frame shortcuts.
+        # Queries keep gradients (they must learn region prototypes); S does
+        # not receive region-path gradients (it learns from gates + rec/flow).
+        seq_sg = seq.detach()
+        k = self.k_proj(seq_sg)
+        v = self.v_proj(seq_sg)
         q = self.queries.unsqueeze(0).expand(b, -1, -1)  # (B, K, C)
         attn = torch.softmax(q @ k.transpose(1, 2) / math.sqrt(self.dim), dim=-1)
         return self.pi(attn @ v)  # (B, K, C)

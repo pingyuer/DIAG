@@ -37,6 +37,7 @@ W_THRESHOLDS = {  # O1-O10 watch table (002 sec.2); written as run tags
     "watch/overfit_eps": 3,
     "watch/hd95_tol": 1.10,  # x paper 5.43
     "watch/cv_tol": 1e-4,  # 100x paper 1e-6
+    "watch/ds_min": 0.05,  # ds collapse alarm (003 sec.5.4)
 }
 
 sys.path.insert(0, "src")
@@ -46,6 +47,7 @@ from diag.anchoring import BACKBONE_RECORD, ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.hdc import HDC
 from diag.losses import DiagLoss, DiagLossWeights
+from diag.ds_head import DsHead
 from diag.pclf import PCLF
 
 DATA = Path("/input0/processed/camus_png256_10f")
@@ -84,17 +86,19 @@ def main():
     anchor = ContentAnchor().to(dev)
     C = anchor.out_channels
     pclf = PCLF(C).to(dev)
+    ds_head = DsHead(C).to(dev)
     hdc = HDC(C, num_queries=4).to(dev)
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
     loss_fn = DiagLoss(DiagLossWeights(), state_dim=C).to(dev)
     params = list(anchor.parameters()) + list(pclf.parameters()) + list(hdc.parameters()) \
-        + list(dec.parameters()) + list(loss_fn.parameters())
+        + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters())
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", patience=5, factor=0.5)
 
     W = {"n": 0, "ce": 0.0, "dice": 0.0, "rec": 0.0, "smooth": 0.0, "flow": 0.0,
          "iou": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
-         "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0}
+         "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0,
+         "ds_mean": 0.0, "ds_min": 0.0}
 
     def w_log(suffix: str, gstep: int) -> None:
         # W-step window (002 sec.1): six loss splits + K/gamma/best/alpha + grad norms
@@ -109,13 +113,15 @@ def main():
         mlflow.log_metric(f"wstep/alpha_f{suffix}", W["alpha_f"] / n, step=gstep)
         mlflow.log_metric(f"wstep/grad_pre{suffix}", W["gn_pre"] / n, step=gstep)
         mlflow.log_metric(f"wstep/grad_post{suffix}", W["gn_post"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/ds_mean{suffix}", W.get("ds_mean", 0.0) / n, step=gstep)
+        mlflow.log_metric(f"wstep/ds_min{suffix}", W.get("ds_min", 0.0) / n, step=gstep)
         btot = max(sum(W["best"]), 1)
         for j in range(3):
             mlflow.log_metric(f"wstep/best_j{j}{suffix}", W["best"][j] / btot, step=gstep)
 
     def w_reset() -> None:
         for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "k", "gamma", "gsat",
-                  "alpha_c", "alpha_f", "gn_pre", "gn_post"):
+                  "alpha_c", "alpha_f", "gn_pre", "gn_post", "ds_mean", "ds_min"):
             W[k] = 0.0
         W["n"] = 0
         W["best"] = [0, 0, 0]
@@ -133,13 +139,15 @@ def main():
             x, g = load_patient(p)
             x = x.to(dev)
             g_small = F.interpolate(g.flatten(0, 1), size=(256, 256), mode="nearest").view(10, 1, 1, 256, 256).to(dev)
-            dts = torch.ones(9, device=dev)
             if train:
                 opt.zero_grad()
             with torch.set_grad_enabled(train):
                 feats = [anchor(f) for f in x]
                 f_tf = torch.stack([o["F_tf"] for o in feats])
                 f_tc = torch.stack([o["F_tc"] for o in feats])
+                with torch.no_grad():
+                    ds_vec = ds_head(f_tf)  # (B,T-1) learned steps, detached inside
+                dts = ds_vec[0]
                 pf = pclf.forward(f_tf, f_tc, dts)
                 s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
                 ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
@@ -166,6 +174,8 @@ def main():
                     W["gn_post"] += float(gn_post)
                     for j in out["best"].tolist():
                         W["best"][int(j)] += 1
+                    W["ds_mean"] = W.get("ds_mean", 0.0) + float(ds_vec.mean())
+                    W["ds_min"] = W.get("ds_min", 0.0) + float(ds_vec.min())
                     if gstep is not None and W["n"] % max(args.w_step, 1) == 0:
                         gstep[0] += 1
                         w_log(suffix, gstep[0])
@@ -190,7 +200,7 @@ def main():
         mlflow.set_tag("node", "camus-fullchain-train")
         mlflow.set_tag("backbone", BACKBONE_RECORD["name"] + "-random-init-DEVIATION")
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
-        mlflow.set_tag("dts", "ones-no-timestamp-DEVIATION")
+        mlflow.set_tag("dts", "ds-head-learned-DEVIATION-fallback-ones")
         for k, v in W_THRESHOLDS.items():
             mlflow.set_tag(k, str(v))
         for k, v in vars(args).items():
