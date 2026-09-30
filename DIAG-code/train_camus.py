@@ -28,6 +28,17 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+W_THRESHOLDS = {  # O1-O10 watch table (002 sec.2); written as run tags
+    "watch/gamma_sat": 0.3,
+    "watch/k_lo": 0.05,
+    "watch/k_hi": 0.95,
+    "watch/best_mono": 0.95,
+    "watch/val_stall": 0.001,
+    "watch/overfit_eps": 3,
+    "watch/hd95_tol": 1.10,  # x paper 5.43
+    "watch/cv_tol": 1e-4,  # 100x paper 1e-6
+}
+
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
@@ -46,9 +57,9 @@ def load_patient(p: str):
     imgs = sorted((DATA / "img" / p).glob("*.png"))[:10]
     gts = sorted((DATA / "gt_lv" / p).glob("*.png"))[:10]
     x = torch.stack([torch.from_numpy(__import__("numpy").asarray(Image.open(f))).float().div(255)
-                     for f in imgs]).unsqueeze(1)
+                     for f in imgs]).unsqueeze(1).unsqueeze(1)  # (T,1,1,H,W)
     g = torch.stack([torch.from_numpy(__import__("numpy").asarray(Image.open(f))).float()
-                     for f in gts]).unsqueeze(1)
+                     for f in gts]).unsqueeze(1).unsqueeze(1)
     return x, (g > 0.5).float()
 
 
@@ -59,6 +70,8 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--subset", type=int, default=0, help="0=all train patients")
     ap.add_argument("--run-name", default="camus-fullchain")
+    ap.add_argument("--w-step", type=int, default=50, help="W-step log every N steps (002 sec.1)")
+    ap.add_argument("--diag-every", type=int, default=5, help="W-event diagnose snapshot every K epochs (0=off)")
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
@@ -79,7 +92,36 @@ def main():
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", patience=5, factor=0.5)
 
-    def step(batch_ids: list[str], train: bool):
+    W = {"n": 0, "ce": 0.0, "dice": 0.0, "rec": 0.0, "smooth": 0.0, "flow": 0.0,
+         "iou": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
+         "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0}
+
+    def w_log(suffix: str, gstep: int) -> None:
+        # W-step window (002 sec.1): six loss splits + K/gamma/best/alpha + grad norms
+        n = max(W["n"], 1)
+        mlflow.log_metric(f"wstep/loss_total{suffix}", W["ce"] / n + W["dice"] / n, step=gstep)
+        for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+            mlflow.log_metric(f"wstep/loss_{k}{suffix}", W[k] / n, step=gstep)
+        mlflow.log_metric(f"wstep/k_mean{suffix}", W["k"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/gamma_mean{suffix}", W["gamma"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/gamma_sat{suffix}", W["gsat"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/alpha_c{suffix}", W["alpha_c"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/alpha_f{suffix}", W["alpha_f"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/grad_pre{suffix}", W["gn_pre"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/grad_post{suffix}", W["gn_post"] / n, step=gstep)
+        btot = max(sum(W["best"]), 1)
+        for j in range(3):
+            mlflow.log_metric(f"wstep/best_j{j}{suffix}", W["best"][j] / btot, step=gstep)
+
+    def w_reset() -> None:
+        for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "k", "gamma", "gsat",
+                  "alpha_c", "alpha_f", "gn_pre", "gn_post"):
+            W[k] = 0.0
+        W["n"] = 0
+        W["best"] = [0, 0, 0]
+
+    def step(batch_ids: list[str], train: bool, gstep: list[int] | None = None,
+             suffix: str = ""):
         if train:
             for m in (anchor, pclf, hdc, dec, loss_fn):
                 m.train()
@@ -90,23 +132,44 @@ def main():
         for p in batch_ids:
             x, g = load_patient(p)
             x = x.to(dev)
-            g_small = F.interpolate(g.flatten(0, 1).unsqueeze(1), size=(256, 256), mode="nearest").view(10, 1, 1, 256, 256).to(dev)
+            g_small = F.interpolate(g.flatten(0, 1), size=(256, 256), mode="nearest").view(10, 1, 1, 256, 256).to(dev)
             dts = torch.ones(9, device=dev)
             if train:
                 opt.zero_grad()
             with torch.set_grad_enabled(train):
-                feats = [anchor(f.unsqueeze(0)) for f in x]
+                feats = [anchor(f) for f in x]
                 f_tf = torch.stack([o["F_tf"] for o in feats])
                 f_tc = torch.stack([o["F_tc"] for o in feats])
                 pf = pclf.forward(f_tf, f_tc, dts)
                 s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
-                ho = hdc(f_tf, s_tf, s_tc)
+                ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
                 do = dec(ho["F_e"], ho["P"], ho["Q_e"])
                 lab = torch.ones(10, 1, dtype=torch.bool, device=dev)
                 out = loss_fn(do["masks"], do["quality"], g_small, lab, s_tf, pf["fine"]["obs"], dts)
                 if train:
                     out["total"].backward()
+                    gn_pre = torch.nn.utils.clip_grad_norm_(params, 1.0)
+                    gn_post = sum(p.grad.norm().item() ** 2 for p in params if p.grad is not None) ** 0.5
                     opt.step()
+                    # W-step accumulators (train only)
+                    W["n"] += 1
+                    for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+                        W[k] += float(out[k])
+                    kf = pf["fine"]["gates"].detach()
+                    W["k"] += float(kf.mean())
+                    gm = ho["gamma"].detach()
+                    W["gamma"] += float(gm.mean())
+                    W["gsat"] += float((gm > 0.95).float().mean())
+                    W["alpha_c"] += float(ho["alpha_c"])
+                    W["alpha_f"] += float(ho["alpha_f"])
+                    W["gn_pre"] += float(gn_pre)
+                    W["gn_post"] += float(gn_post)
+                    for j in out["best"].tolist():
+                        W["best"][int(j)] += 1
+                    if gstep is not None and W["n"] % max(args.w_step, 1) == 0:
+                        gstep[0] += 1
+                        w_log(suffix, gstep[0])
+                        w_reset()
             with torch.no_grad():
                 sel = do["quality"].argmax(-1)
                 prob = torch.sigmoid(do["masks"])
@@ -128,26 +191,82 @@ def main():
         mlflow.set_tag("backbone", BACKBONE_RECORD["name"] + "-random-init-DEVIATION")
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
         mlflow.set_tag("dts", "ones-no-timestamp-DEVIATION")
-        mlflow.log_param("epochs", args.epochs)
-        mlflow.log_param("batch", args.batch)
-        mlflow.log_param("lr", args.lr)
+        for k, v in W_THRESHOLDS.items():
+            mlflow.set_tag(k, str(v))
+        for k, v in vars(args).items():
+            mlflow.log_param(k, v)
         mlflow.log_param("train_n", len(train_ids))
+        mlflow.log_param("val_n", len(val_ids))
         best_val = 0.0
+        gstep = [0]
+        from diag_metrics import (area_roughness, centroid_drift, hd95,
+                                  interframe_dice_variation)
+        vids = val_ids[:8]  # W-epoch temporal/HD95 subset (cost control)
         for ep in range(args.epochs):
             tl_acc, td_acc, nb = 0.0, 0.0, 0
             for i in range(0, len(train_ids), args.batch):
-                l, d = step(train_ids[i:i + args.batch], True)
+                l, d = step(train_ids[i:i + args.batch], True, gstep, suffix="")
                 tl_acc += l
                 td_acc += d
                 nb += 1
             tl, td = tl_acc / nb, td_acc / nb
             vl, vd = step(val_ids, False)
             sched.step(vd)
+            # W-epoch: loss-epoch means + HD95/temporal/ED-ES-Mean on val subset
+            hd_list, dr_list, rg_list, va_list, ed_list, es_list = [], [], [], [], [], []
+            with torch.no_grad():
+                for m in (anchor, pclf, hdc, dec):
+                    m.eval()
+                for pid in vids:
+                    xv, gv = load_patient(pid)
+                    xv = xv.to(dev)
+                    gs = F.interpolate(gv.flatten(0, 1), size=(256, 256),
+                                       mode="nearest").view(10, 1, 1, 256, 256).to(dev)
+                    feats = [anchor(f) for f in xv]
+                    ft = torch.stack([o["F_tf"] for o in feats])
+                    fc = torch.stack([o["F_tc"] for o in feats])
+                    pfv = pclf.forward(ft, fc, torch.ones(9, device=dev))
+                    hov = hdc(ft, pfv["fine"]["states"], pfv["coarse"]["states"])
+                    dov = dec(hov["F_e"], hov["P"], hov["Q_e"])
+                    sel = dov["quality"].argmax(-1).reshape(-1)
+                    prob = torch.sigmoid(dov["masks"]).reshape(-1, 3, 256, 256)
+                    pv = (prob[torch.arange(sel.shape[0]), sel] > 0.5).float().view(10, 1, 1, 256, 256)
+                    ed_list.append(float(dice_score(pv[[0]], gs[[0]]).mean()))
+                    es_list.append(float(dice_score(pv[[-1]], gs[[-1]]).mean()))
+                    for i in range(10):
+                        gi, pi = gs[i].reshape(1, 256, 256), pv[i].reshape(1, 256, 256)
+                        if gi.sum() > 0 and pi.sum() > 0:
+                            hd_list.append(float(hd95(pi, gi).mean()))
+                    dr_list.append(float(centroid_drift(pv).mean()))
+                    rg_list.append(float(area_roughness(pv).mean()))
+                    va_list.append(float(interframe_dice_variation(pv).mean()))
+            import numpy as _np
             mlflow.log_metric("train_loss", tl, step=ep)
             mlflow.log_metric("train_dice", td, step=ep)
             mlflow.log_metric("val_loss", vl, step=ep)
             mlflow.log_metric("val_dice", vd, step=ep)
             mlflow.log_metric("lr", opt.param_groups[0]["lr"], step=ep)
+            mlflow.log_metric("val_hd95", float(_np.mean(hd_list)) if hd_list else -1, step=ep)
+            mlflow.log_metric("val_drift", float(_np.mean(dr_list)), step=ep)
+            mlflow.log_metric("val_rough", float(_np.mean(rg_list)), step=ep)
+            mlflow.log_metric("val_ifvar", float(_np.mean(va_list)), step=ep)
+            mlflow.log_metric("val_ED", float(_np.mean(ed_list)), step=ep)
+            mlflow.log_metric("val_ES", float(_np.mean(es_list)), step=ep)
+            if args.diag_every > 0 and (ep % args.diag_every == 0 or ep == args.epochs - 1):
+                # W-event diagnose snapshot: gamma archive from one val clip
+                with torch.no_grad():
+                    xv0, _ = load_patient(vids[0])
+                    xv0 = xv0.to(dev)
+                    fz = [anchor(f) for f in xv0]
+                    ft0 = torch.stack([o["F_tf"] for o in fz])
+                    fc0 = torch.stack([o["F_tc"] for o in fz])
+                    pf0 = pclf.forward(ft0, fc0, torch.ones(9, device=dev))
+                    ho0 = hdc(ft0, pf0["fine"]["states"], pf0["coarse"]["states"],
+                              record_gamma=True)
+                    glog = [g.detach().cpu() for g in ho0["gamma_log"][0].unbind(0)]
+                    from diag.hdc import adjacent_ratio_cv as _arcv
+                    cv = _arcv(glog)["cv"]
+                mlflow.log_metric("diag/gamma_cv_val", cv, step=ep)
             print(f"ep{ep:03d} train_loss={tl:.4f} train_dice={td:.4f} val_loss={vl:.4f} val_dice={vd:.4f} "
                   f"lr={opt.param_groups[0]['lr']:.1e} t={time.time()-t0:.0f}s", flush=True)
             ckpt = {"epoch": ep, "anchor": anchor.state_dict(), "pclf": pclf.state_dict(),
