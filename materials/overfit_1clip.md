@@ -31,3 +31,9 @@
 
 - 本节点只证"优化通路活"，不产生 Table 1–2 对照数值；dice 0.95 为单 clip 记忆，**禁止**引用。
 - `:32237` 主训练 ep003 val_dice 0.83（anchor 提及）属另一 running 节点，其验收待该节点提交后另行 evaluation，本文件不覆盖。
+
+## 5. 打回项关闭（重验 2026-09-30，重验 run overfit-1clip-ckpt 0b679c2a）
+
+- `train_overfit.py` 已加 `torch.save`（commit 0a01047，diff 已读验：5 state_dict + loss/dice 起止 + code_sha，远端落 `/root/DIAG/outputs/overfit_1clip.pt`，本地 fallback 路径保留）。
+- 新 run `overfit-1clip-ckpt` FINISHED：60 点 loss 1.7678→0.4454、dice 0.0471→0.9502（与旧 072c1454 同分布，方向一致）；四 DEVIATION tags + patient/steps/lr params 齐；code_sha=d6fcd138（当次 tarball）。
+- ckpt `outputs/remote-31035/overfit_1clip.pt`（33MB，gitignored）：md5 本地==远端（43856bcd…），内容含 anchor/pclf/hdc/dec 四 state（参数量 7625314/406848/94274/128868 与各验收一致）+ loss/dice 起止 + sha。打回项关闭，本节点转 done。
