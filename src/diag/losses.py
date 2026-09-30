@@ -81,11 +81,11 @@ class DiagLoss(nn.Module):
         dts: torch.Tensor | float = 1.0,  # (T-1,) intervals for smooth/flow
     ) -> dict[str, torch.Tensor]:
         t, b, j = masks.shape[:3]
-        lab = labeled.bool()
+        lab = labeled.bool().reshape(t * b)
         assert lab.any(), "Omega empty: no labeled frames"
-        flat_masks = masks[lab]  # (N,J,H,W)
-        flat_gt = gt[lab].expand(-1, j, -1, -1)  # (N,J,H,W)
-        flat_q = quality[lab]  # (N,J)
+        flat_masks = masks.reshape(t * b, j, *masks.shape[3:])[lab]  # (N,J,H,W)
+        flat_gt = gt.reshape(t * b, 1, *gt.shape[3:])[lab].expand(-1, j, -1, -1)
+        flat_q = quality.reshape(t * b, j)[lab]  # (N,J)
 
         with torch.no_grad():
             prob = torch.sigmoid(flat_masks)
@@ -96,14 +96,15 @@ class DiagLoss(nn.Module):
 
         n = flat_masks.shape[0]
         win = flat_masks[torch.arange(n), best].unsqueeze(1)  # (N,1,H,W)
-        tgt = gt[lab]  # (N,1,H,W)
+        tgt = gt.reshape(t * b, 1, *gt.shape[3:])[lab]  # (N,1,H,W)
         l_ce = F.binary_cross_entropy_with_logits(win, tgt)
         l_dice = dice_loss(win, tgt)
         l_iou = F.binary_cross_entropy_with_logits(flat_q, iou)
 
         # rec: state decodes back to obs feature (labeled frames only).
         # states (N,C,Hs,Ws) already 4D after boolean index; Conv2d direct.
-        sf, ff = states_f[lab], feats_f[lab]
+        sf = states_f.reshape(t * b, *states_f.shape[2:])[lab]
+        ff = feats_f.reshape(t * b, *feats_f.shape[2:])[lab]
         l_rec = F.mse_loss(self.rec_probe(sf), ff)
 
         # smooth: velocity penalty ||S_t - S_{t-1}||^2 / dt (causal pairs)
