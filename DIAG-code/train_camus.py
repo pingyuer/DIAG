@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--run-name", default="camus-fullchain")
     ap.add_argument("--w-step", type=int, default=50, help="W-step log every N steps (002 sec.1)")
     ap.add_argument("--diag-every", type=int, default=5, help="W-event diagnose snapshot every K epochs (0=off)")
+    ap.add_argument("--frame-only", action="store_true",
+                    help="H1 baseline: bypass PCLF/HDC, decode F_tf directly (no dynamics)")
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
@@ -148,12 +150,25 @@ def main():
                 with torch.no_grad():
                     ds_vec = ds_head(f_tf)  # (B,T-1) learned steps, detached inside
                 dts = ds_vec[0]
-                pf = pclf.forward(f_tf, f_tc, dts)
-                s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
-                ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
-                do = dec(ho["F_e"], ho["P"], ho["Q_e"])
+                if args.frame_only:
+                    # H1 baseline: no dynamics; decode content features directly.
+                    # Q_e zeros keep decoder signature; quality still learns selection.
+                    t_, b_ = f_tf.shape[:2]
+                    zq = torch.zeros(t_, b_, 4, f_tf.shape[2], device=dev)
+                    do = dec(f_tf, f_tf, zq)
+                    pf = None
+                    s_tf = f_tf  # rec/smooth/flow targets degrade to identity
+                    obs_f = f_tf
+                    ho = {"gamma": torch.full_like(f_tf[:, :, :1], 0.88),
+                          "alpha_c": torch.tensor(0.0), "alpha_f": torch.tensor(0.0)}
+                else:
+                    pf = pclf.forward(f_tf, f_tc, dts)
+                    s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
+                    ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
+                    do = dec(ho["F_e"], ho["P"], ho["Q_e"])
+                    obs_f = pf["fine"]["obs"]
                 lab = torch.ones(10, 1, dtype=torch.bool, device=dev)
-                out = loss_fn(do["masks"], do["quality"], g_small, lab, s_tf, pf["fine"]["obs"], dts)
+                out = loss_fn(do["masks"], do["quality"], g_small, lab, s_tf, obs_f, dts)
                 if train:
                     out["total"].backward()
                     gn_pre = torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -163,8 +178,8 @@ def main():
                     W["n"] += 1
                     for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
                         W[k] += float(out[k])
-                    kf = pf["fine"]["gates"].detach()
-                    W["k"] += float(kf.mean())
+                    kf = pf["fine"]["gates"].detach() if pf is not None else None
+                    W["k"] += float(kf.mean()) if kf is not None else 0.0
                     gm = ho["gamma"].detach()
                     W["gamma"] += float(gm.mean())
                     W["gsat"] += float((gm > 0.95).float().mean())
@@ -197,7 +212,7 @@ def main():
     t0 = time.time()
     with mlflow.start_run(run_name=args.run_name) as run:
         mlflow.set_tag("code_sha", code_sha)
-        mlflow.set_tag("node", "camus-fullchain-train")
+        mlflow.set_tag("node", "frame-only-baseline" if args.frame_only else "camus-fullchain-train")
         mlflow.set_tag("backbone", BACKBONE_RECORD["name"] + "-random-init-DEVIATION")
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
         mlflow.set_tag("dts", "ds-head-learned-DEVIATION-fallback-ones")
