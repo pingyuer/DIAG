@@ -201,6 +201,8 @@ def main():
                     obs_f = f_tf
                     ho = {"gamma": torch.full_like(f_tf[:, :, :1], 0.88),
                           "alpha_c": torch.tensor(0.0), "alpha_f": torch.tensor(0.0)}
+                    sv_smooth_extra = None
+                    sv_delta = 0.0
                 else:
                     pf = pclf.forward(f_tf, f_tc, dts)
                     s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
