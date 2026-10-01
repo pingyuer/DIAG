@@ -45,16 +45,22 @@ class DiffeomorphicTransform(nn.Module):
         return g
 
     def exp(self, v: torch.Tensor) -> torch.Tensor:
-        """v: (B,2,H,W) stationary velocity (normalized units) -> phi grid."""
+        """v: (B,2,H,W) stationary velocity (normalized units) -> phi grid.
+
+        Correct S&S on displacement fields: u = v/2^N, then N times u <- u o u
+        (compose DISPLACEMENT with itself: sample u at (id+u), add). The old
+        code sampled the full coordinates and doubled (delta*2-id), which
+        doubles the base position each step (verified inverse maxdiff 1.6).
+        """
         b, _, h, w = v.shape
-        phi = self.identity_grid(b, h, w, v.device) + v.permute(0, 2, 3, 1) / (2 ** self.steps)
+        u = v.permute(0, 2, 3, 1) / (2 ** self.steps)  # small displacement
+        ident = self.identity_grid(b, h, w, v.device)
         for _ in range(self.steps):
-            delta = F.grid_sample(
-                phi.permute(0, 3, 1, 2), phi, mode="bilinear",
-                padding_mode="border", align_corners=False) .permute(0, 2, 3, 1)
-            phi = delta * 2 - self.identity_grid(b, h, w, v.device)
-            # compose: phi = phi o phi in normalized coords: sample offset then add
-        return phi
+            samp = F.grid_sample(
+                u.permute(0, 3, 1, 2), ident + u, mode="bilinear",
+                padding_mode="border", align_corners=False).permute(0, 2, 3, 1)
+            u = u + samp  # u <- u + u(id+u): self-composition of displacement
+        return ident + u
 
     def forward(self, v: torch.Tensor) -> dict[str, torch.Tensor]:
         return {"phi": self.exp(v), "phi_inv": self.exp(-v)}

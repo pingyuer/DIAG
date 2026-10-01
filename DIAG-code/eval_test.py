@@ -24,7 +24,8 @@ from diag.pclf import PCLF
 
 DATA = Path("outputs/camus_test_pull")  # scp target; fallback remote path first
 REMOTE = "root@172.16.240.188:/input0/processed/camus_png256_10f"
-CKPT = Path("outputs/remote-32237/camus_train/best.pt")
+import os
+CKPT = Path(os.environ.get("DIAG_CKPT", "outputs/remote-31035/camus_train/dsfull_best.pt"))
 
 
 def main():
@@ -93,8 +94,20 @@ def main():
         roughs.append(float(area_roughness(pred).mean()))
         varis.append(float(interframe_dice_variation(pred).mean()))
     pf = torch.cat(per_frame)
+    # R1: true patient ids (arange repeat, NOT hash): per-patient mean then mean.
+    # R2(a): first/last-frame naming (NOT ED/ES; ED/ES needs official metadata).
+    n_pat = len(per_frame)
+    pid_idx = torch.arange(n_pat).repeat_interleave(10)
+    per_pat_dice = torch.stack([per_frame[i].mean() for i in range(n_pat)])
     print(f"frame-mean dice={float(pf.mean()):.4f}", flush=True)
-    print(f"patient-avg dice={float(patient_average(pf, torch.tensor([hash(p) % 10**6 for p in per_pid]))):.4f} (approx ids)", flush=True)
+    print(f"patient-avg dice={float(per_pat_dice.mean()):.4f}", flush=True)
+    print(f"first-frame dice={float(torch.stack([per_frame[i][0].mean() for i in range(n_pat)]).mean()):.4f}", flush=True)
+    print(f"last-frame dice={float(torch.stack([per_frame[i][-1].mean() for i in range(n_pat)]).mean()):.4f}", flush=True)
+    # R3: split md5 + seed tags for rerun lock
+    import hashlib
+    split_md5 = hashlib.md5(Path("/tmp/camus_split.json").read_bytes()).hexdigest()[:8] \
+        if Path("/tmp/camus_split.json").exists() else "remote-unfetched"
+    print(f"split_md5={split_md5} seed=0", flush=True)
     import numpy as np_
     print(f"hd95 mean={np_.mean(hvals):.2f} n={len(hvals)}", flush=True)
     print(f"drift={np_.mean(drifts):.2f} rough={np_.mean(roughs):.1f} var={np_.mean(varis):.4f}", flush=True)
