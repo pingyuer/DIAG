@@ -296,6 +296,7 @@ def main():
                   f"lr={opt.param_groups[0]['lr']:.1e} t={time.time()-t0:.0f}s", flush=True)
             ckpt = {"epoch": ep, "anchor": anchor.state_dict(), "pclf": pclf.state_dict(),
                     "hdc": hdc.state_dict(), "dec": dec.state_dict(), "opt": opt.state_dict(),
+                    "ds_head": ds_head.state_dict(), "frame_only": bool(args.frame_only),
                     "val_dice": vd, "code_sha": code_sha}
             torch.save(ckpt, OUT / "last.pt")
             if vd > best_val:
