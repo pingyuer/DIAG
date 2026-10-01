@@ -51,7 +51,7 @@ from diag.ds_head import DsHead
 from diag.pclf import PCLF
 
 DATA = Path("/input0/processed/camus_png256_10f")
-OUT = Path("/root/DIAG/outputs/camus_train")
+OUT = Path(__import__("os").environ.get("DIAG_OUT", "/root/DIAG/outputs/camus_train"))
 MLFLOW_URI = "http://172.16.240.77:5000"
 
 
