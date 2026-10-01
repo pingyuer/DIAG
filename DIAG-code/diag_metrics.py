@@ -40,6 +40,14 @@ def dice_score(pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-6) -> t
     """Binary Dice per item over trailing (H, W). pred logits or 0/1, target 0/1."""
     p = (torch.sigmoid(pred) > 0.5).float() if pred.is_floating_point() else pred.float()
     t = target.float()
+    if p.shape != t.shape:
+        # Broadcast guard: 61GB OOM precedent (500,256,256)x(500,1,1,256,256).
+        # Squeeze only size-1 dims; anything else is a caller bug, fail loud.
+        while t.dim() > p.dim() and t.shape[1] == 1:
+            t = t.squeeze(1)
+        while p.dim() > t.dim() and p.shape[1] == 1:
+            p = p.squeeze(1)
+    assert p.shape == t.shape, f"dice rank mismatch: {tuple(p.shape)} vs {tuple(t.shape)}"
     inter = (p * t).sum(dim=(-2, -1))
     denom = (p + t).sum(dim=(-2, -1))
     both_empty = denom == 0
@@ -145,3 +153,85 @@ def patient_average(per_frame: torch.Tensor, patient_id: torch.Tensor) -> torch.
     for pid in ids.unique():
         out.append(vals[ids == pid].mean())
     return torch.stack(out).mean()
+
+
+def hd95_mirror(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """MONAI-mirror HD95 (upstream training/metrics.py:90 surface_metrics_single).
+
+    Same conventions as upstream: both-empty -> 0; either-empty -> max_dim;
+    MONAI HausdorffDistanceMetric(percentile=95); non-finite -> max_dim.
+    Original cdist hd95() kept for cross-check; this one is the reporting one.
+    """
+    from monai.metrics import HausdorffDistanceMetric
+    import numpy as np
+
+    p, t = pred.float(), target.float()
+    *batch, h, w = p.shape
+    pf = (p.reshape(-1, h, w) > 0.5)
+    tf = (t.reshape(-1, h, w) > 0.5)
+    vals = []
+    for i in range(pf.shape[0]):
+        ps = float(pf[i].sum())
+        gs = float(tf[i].sum())
+        if ps == 0.0 and gs == 0.0:
+            vals.append(0.0)
+            continue
+        if ps == 0.0 or gs == 0.0:
+            vals.append(float(max(h, w)))
+            continue
+        m = HausdorffDistanceMetric(include_background=False, percentile=95,
+                                    reduction="mean")
+        m(y_pred=pf[i : i + 1].unsqueeze(0).float(),
+          y=tf[i : i + 1].unsqueeze(0).float())
+        v = m.aggregate()
+        v = v.item() if isinstance(v, torch.Tensor) else float(v)
+        vals.append(v if np.isfinite(v) else float(max(h, w)))
+    return torch.tensor(vals, dtype=torch.float32, device=pred.device).view(*batch)
+
+
+def postprocess_binary_mask(
+    mask: torch.Tensor,
+    min_size: int = 16,
+    keep_largest: bool = True,
+    fill_holes: bool = True,
+    remove_small: bool = True,
+    binary_closing: bool = True,
+) -> torch.Tensor:
+    """Upstream mirror (training/metrics.py postprocess_binary_mask), default ON here.
+
+    Largest component + fill holes + remove small + binary closing (3x3).
+    Upstream gates behind cfg flag (default off); eval turns it on explicitly.
+    """
+    from scipy import ndimage
+
+    import numpy as np
+
+    structure = np.ones((3, 3), dtype=bool)
+    arr = mask.detach().cpu().numpy().astype(bool)
+    out = np.zeros_like(arr, dtype=np.float32)
+    flat = arr.reshape(-1, arr.shape[-2], arr.shape[-1])
+    flat_out = out.reshape(-1, out.shape[-2], out.shape[-1])
+    for idx, item in enumerate(flat):
+        if keep_largest:
+            from scipy.ndimage import label as _label
+
+            labels, num = _label(item, structure=structure)
+            if num > 0:
+                counts = np.bincount(labels.ravel())
+                counts[0] = 0
+                item = labels == int(counts.argmax())
+        if fill_holes:
+            item = ndimage.binary_fill_holes(item)
+        if remove_small and min_size > 1:
+            from scipy.ndimage import label as _label2
+
+            labels, num = _label2(item, structure=structure)
+            if num > 0:
+                counts = np.bincount(labels.ravel())
+                keep = counts >= min_size
+                keep[0] = False
+                item = keep[labels]
+        if binary_closing:
+            item = ndimage.binary_closing(item, structure=structure)
+        flat_out[idx] = item.astype(np.float32)
+    return torch.as_tensor(out, device=mask.device, dtype=mask.dtype)

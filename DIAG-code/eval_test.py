@@ -16,7 +16,8 @@ from PIL import Image
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import (area_roughness, centroid_drift, dice_score, hd95,
-                          interframe_dice_variation, patient_average)
+                          hd95_mirror, interframe_dice_variation,
+                          patient_average, postprocess_binary_mask)
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.hdc import HDC
@@ -57,9 +58,18 @@ def main():
     hdc.load_state_dict(ckpt["hdc"])
     dec.load_state_dict(ckpt["dec"])
 
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sweep", action="store_true", help="threshold sweep 0.30-0.75 on probs")
+    ap.add_argument("--postprocess", action="store_true", help="upstream postprocess on masks")
+    ap.add_argument("--hd95-mirror", action="store_true", dest="mirror",
+                    help="report MONAI-mirror HD95 alongside cdist")
+    a = ap.parse_args()
+
     DATA.mkdir(parents=True, exist_ok=True)
     dts = torch.ones(9)
-    per_frame, per_pid, hvals, drifts, roughs, varis = [], [], [], [], [], []
+    per_frame, per_pid, hvals, hvals_m, drifts, roughs, varis = [], [], [], [], [], [], []
+    all_probs, all_gts = [], []
     for pid in test_ids:
         d = DATA / pid
         if not (d / "img").exists():
@@ -83,13 +93,19 @@ def main():
             sel = do["quality"].argmax(-1).reshape(-1)
             prob = torch.sigmoid(do["masks"]).reshape(-1, 3, 256, 256)
             best = prob[torch.arange(sel.shape[0]), sel]
+            all_probs.append(best.detach().cpu())
+            all_gts.append(g.cpu())
             pred = (best > 0.5).float().view(10, 1, 1, 256, 256)
+            if a.postprocess:
+                pred = postprocess_binary_mask(pred)
         d = dice_score(pred, g)
         per_frame.append(d)
         per_pid += [pid] * 10
         for i in range(10):
             if g[i].sum() > 0 and pred[i].sum() > 0:
                 hvals.append(float(hd95(pred[i:i+1], g[i:i+1]).mean()))
+                if a.mirror:
+                    hvals_m.append(float(hd95_mirror(pred[i:i+1], g[i:i+1]).mean()))
         drifts.append(float(centroid_drift(pred).mean()))
         roughs.append(float(area_roughness(pred).mean()))
         varis.append(float(interframe_dice_variation(pred).mean()))
@@ -110,7 +126,27 @@ def main():
     print(f"split_md5={split_md5} seed=0", flush=True)
     import numpy as np_
     print(f"hd95 mean={np_.mean(hvals):.2f} n={len(hvals)}", flush=True)
+    if a.mirror:
+        print(f"hd95_mirror mean={np_.mean(hvals_m):.2f} n={len(hvals_m)}", flush=True)
     print(f"drift={np_.mean(drifts):.2f} rough={np_.mean(roughs):.1f} var={np_.mean(varis):.4f}", flush=True)
+    if a.sweep:
+        import csv
+        # OOM fix: all_probs (500,256,256) vs all_gts (500,1,1,256,256)
+        # broadcast to (500,1,500,256,256) = 61GB. Squeeze G first.
+        P = torch.cat(all_probs)  # (500,256,256)
+        G = torch.cat(all_gts).squeeze(1).squeeze(1)  # (500,256,256)
+        assert P.shape == G.shape, (P.shape, G.shape)
+        rows = []
+        for th in (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75):
+            dth = float(dice_score((P > th).float(), G).mean())
+            rows.append((th, dth))
+            print(f"th={th:.2f} dice={dth:.4f}", flush=True)
+        best = max(rows, key=lambda r: r[1])
+        print(f"best_th={best[0]:.2f} dice={best[1]:.4f} (default report stays 0.5)", flush=True)
+        with open("outputs/threshold_sweep.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["threshold", "dice"])
+            w.writerows(rows)
 
 
 if __name__ == "__main__":
