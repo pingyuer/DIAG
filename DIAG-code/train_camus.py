@@ -90,6 +90,8 @@ def main():
     ap.add_argument("--l-smooth", type=float, default=0.01)
     ap.add_argument("--l-flow", type=float, default=0.1)
     ap.add_argument("--l-iou", type=float, default=0.5)
+    ap.add_argument("--anchor", default="unext",
+                    help="unext|dinov2-small|dinov2-base (008 frozen pretrained)")
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
@@ -99,7 +101,11 @@ def main():
     val_ids = split["val_data"]
     print(f"train={len(train_ids)} val={len(val_ids)} epochs={args.epochs} batch={args.batch}", flush=True)
 
-    anchor = ContentAnchor().to(dev)
+    if args.anchor == "unext":
+        anchor = ContentAnchor().to(dev)
+    else:
+        from diag.dino_anchor import FrozenDinoAnchor
+        anchor = FrozenDinoAnchor(args.anchor, out_channels=96).to(dev)
     C = anchor.out_channels
     pclf = PCLF(C).to(dev)
     ds_head = DsHead(C).to(dev)
@@ -264,7 +270,7 @@ def main():
         mlflow.set_tag("code_sha", code_sha)
         mlflow.set_tag("node", "frame-only-baseline" if args.frame_only else "camus-fullchain-train")
         mlflow.set_tag("norm", str(bool(args.norm)))
-        mlflow.set_tag("backbone", BACKBONE_RECORD["name"] + "-random-init-DEVIATION")
+        mlflow.set_tag("backbone", args.anchor + ("-random-init-DEVIATION" if args.anchor == "unext" else "-frozen-pretrained"))
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
         mlflow.set_tag("dts", "ds-head-learned-DEVIATION-fallback-ones")
         for k, v in W_THRESHOLDS.items():
