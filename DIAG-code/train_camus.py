@@ -97,13 +97,12 @@ def main():
     hdc = HDC(C, num_queries=4).to(dev)
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
     loss_fn = DiagLoss(DiagLossWeights(), state_dim=C).to(dev)
-    from diag.svf import SVFWarpHead
-    svf_head = SVFWarpHead(C, max_disp=args.max_disp, smooth_w=args.svf_smooth,
-                           enabled=args.svf).to(dev)
-    svf_head.svf.steps = args.ss_steps
+    # SVF REMOVED from chain (003 fallback, grid 18/18 negative 2026-10-01):
+    # val_dice 0.65-0.73 all-grid, HD95 51-68 collapsed, delta>0 but hurts.
+    # svf.py stays as diagnose tool; decoder phi=None default pass-through.
+    svf_head = None
     params = list(anchor.parameters()) + list(pclf.parameters()) + list(hdc.parameters()) \
-        + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters()) \
-        + list(svf_head.parameters())
+        + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters())
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", patience=5, factor=0.5)
 
@@ -178,16 +177,8 @@ def main():
                     pf = pclf.forward(f_tf, f_tc, dts)
                     s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
                     ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
-                    if args.svf:
-                        # SVF warp on quarter-res fine state; phi upsampled in head.
-                        sv = svf_head(s_tf.flatten(0, 1)[:, :, ::4, ::4]
-                                      if s_tf.shape[-1] >= 128 else s_tf.flatten(0, 1),
-                                      s_tf.shape[-2:])
-                        t_, b_ = f_tf.shape[:2]
-                        phi = sv["phi"].view(t_, b_, *sv["phi"].shape[1:])
-                        do = dec(ho["F_e"], ho["P"], ho["Q_e"], phi=phi)
-                        sv_smooth_extra = sv["smooth"]
-                        sv_delta = float(sv["delta"])
+                    if False:  # SVF deleted, see note above
+                        raise RuntimeError("unreachable")
                     else:
                         do = dec(ho["F_e"], ho["P"], ho["Q_e"])
                         sv_smooth_extra = None
