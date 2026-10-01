@@ -76,10 +76,15 @@ def main():
     ap.add_argument("--diag-every", type=int, default=5, help="W-event diagnose snapshot every K epochs (0=off)")
     ap.add_argument("--frame-only", action="store_true",
                     help="H1 baseline: bypass PCLF/HDC, decode F_tf directly (no dynamics)")
+    ap.add_argument("--svf", action="store_true", help="SVF warp branch ON (004 T1-T3)")
+    ap.add_argument("--ss-steps", type=int, default=6)
+    ap.add_argument("--max-disp", type=float, default=0.05)
+    ap.add_argument("--svf-smooth", type=float, default=0.01)
+    ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
-    torch.manual_seed(0)
+    torch.manual_seed(args.seed)
     split = json.loads((DATA / "camus_public_datasplit_20250706.json").read_text())
     train_ids = split["train_data"][: args.subset or None]
     val_ids = split["val_data"]
@@ -92,15 +97,20 @@ def main():
     hdc = HDC(C, num_queries=4).to(dev)
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
     loss_fn = DiagLoss(DiagLossWeights(), state_dim=C).to(dev)
+    from diag.svf import SVFWarpHead
+    svf_head = SVFWarpHead(C, max_disp=args.max_disp, smooth_w=args.svf_smooth,
+                           enabled=args.svf).to(dev)
+    svf_head.svf.steps = args.ss_steps
     params = list(anchor.parameters()) + list(pclf.parameters()) + list(hdc.parameters()) \
-        + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters())
+        + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters()) \
+        + list(svf_head.parameters())
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", patience=5, factor=0.5)
 
     W = {"n": 0, "ce": 0.0, "dice": 0.0, "rec": 0.0, "smooth": 0.0, "flow": 0.0,
          "iou": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
          "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0,
-         "ds_mean": 0.0, "ds_min": 0.0}
+         "ds_mean": 0.0, "ds_min": 0.0, "svf_delta": 0.0, "svf_smooth": 0.0}
 
     def w_log(suffix: str, gstep: int) -> None:
         # W-step window (002 sec.1): six loss splits + K/gamma/best/alpha + grad norms
@@ -117,13 +127,16 @@ def main():
         mlflow.log_metric(f"wstep/grad_post{suffix}", W["gn_post"] / n, step=gstep)
         mlflow.log_metric(f"wstep/ds_mean{suffix}", W.get("ds_mean", 0.0) / n, step=gstep)
         mlflow.log_metric(f"wstep/ds_min{suffix}", W.get("ds_min", 0.0) / n, step=gstep)
+        mlflow.log_metric(f"wstep/svf_delta{suffix}", W.get("svf_delta", 0.0) / n, step=gstep)
+        mlflow.log_metric(f"wstep/svf_smooth{suffix}", W.get("svf_smooth", 0.0) / n, step=gstep)
         btot = max(sum(W["best"]), 1)
         for j in range(3):
             mlflow.log_metric(f"wstep/best_j{j}{suffix}", W["best"][j] / btot, step=gstep)
 
     def w_reset() -> None:
         for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "k", "gamma", "gsat",
-                  "alpha_c", "alpha_f", "gn_pre", "gn_post", "ds_mean", "ds_min"):
+                  "alpha_c", "alpha_f", "gn_pre", "gn_post", "ds_mean", "ds_min",
+                  "svf_delta", "svf_smooth"):
             W[k] = 0.0
         W["n"] = 0
         W["best"] = [0, 0, 0]
@@ -165,10 +178,26 @@ def main():
                     pf = pclf.forward(f_tf, f_tc, dts)
                     s_tf, s_tc = pf["fine"]["states"], pf["coarse"]["states"]
                     ho = hdc(f_tf, s_tf, s_tc, record_gamma=True)
-                    do = dec(ho["F_e"], ho["P"], ho["Q_e"])
+                    if args.svf:
+                        # SVF warp on quarter-res fine state; phi upsampled in head.
+                        sv = svf_head(s_tf.flatten(0, 1)[:, :, ::4, ::4]
+                                      if s_tf.shape[-1] >= 128 else s_tf.flatten(0, 1),
+                                      s_tf.shape[-2:])
+                        t_, b_ = f_tf.shape[:2]
+                        phi = sv["phi"].view(t_, b_, *sv["phi"].shape[1:])
+                        do = dec(ho["F_e"], ho["P"], ho["Q_e"], phi=phi)
+                        sv_smooth_extra = sv["smooth"]
+                        sv_delta = float(sv["delta"])
+                    else:
+                        do = dec(ho["F_e"], ho["P"], ho["Q_e"])
+                        sv_smooth_extra = None
+                        sv_delta = 0.0
                     obs_f = pf["fine"]["obs"]
                 lab = torch.ones(10, 1, dtype=torch.bool, device=dev)
                 out = loss_fn(do["masks"], do["quality"], g_small, lab, s_tf, obs_f, dts)
+                if sv_smooth_extra is not None:
+                    out = dict(out)
+                    out["total"] = out["total"] + sv_smooth_extra
                 if train:
                     out["total"].backward()
                     gn_pre = torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -191,6 +220,10 @@ def main():
                         W["best"][int(j)] += 1
                     W["ds_mean"] = W.get("ds_mean", 0.0) + float(ds_vec.mean())
                     W["ds_min"] = W.get("ds_min", 0.0) + float(ds_vec.min())
+                    W["svf_delta"] = W.get("svf_delta", 0.0) + sv_delta
+                    W["svf_smooth"] = W.get("svf_smooth", 0.0) + float(
+                        sv_smooth_extra.detach() if sv_smooth_extra is not None
+                        else torch.zeros(()))
                     if gstep is not None and W["n"] % max(args.w_step, 1) == 0:
                         gstep[0] += 1
                         w_log(suffix, gstep[0])

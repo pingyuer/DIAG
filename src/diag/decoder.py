@@ -89,14 +89,35 @@ class CandidateDecoder(nn.Module):
         self.recurrence = MaskTokenRecurrence(feat_dim)
 
     def forward(
-        self, f_e: torch.Tensor, p: torch.Tensor, q_e: torch.Tensor
+        self, f_e: torch.Tensor, p: torch.Tensor, q_e: torch.Tensor,
+        phi: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        """f_e/p: (T,B,C,H,W); q_e: (T,B,K,D). Returns masks (T,B,J,Hf,Wf),
-        quality logits (T,B,J), F_dec (T,B,dec,Hf,Wf)."""
+        """f_e/p: (T,B,C,H,W); q_e: (T,B,K,D); phi: optional warp grid (T,B,H,W,2).
+
+        SVF warp (flag-off default): applied to FUSED features BEFORE the
+        shared trunk, so all J candidates see the same warped detail (same
+        principle as dynamic readout sharing). phi=None or identity -> exact
+        pass-through (verified maxdiff 0.0). Returns flow_prompt_delta stat
+        (warped-vs-plain feature shift, promotion criterion 003).
+        """
         t, b = f_e.shape[:2]
         hw = f_e.shape[-2:]
         fused = (f_e + p).flatten(0, 1)  # (TB, C, H, W)
-        feat = self.fuse(fused)  # (TB, dec, H, W)
+        if phi is not None:
+            tb = t * b
+            ph = phi.reshape(tb, *phi.shape[-3:])[..., :2]
+            if ph.shape[1:3] != fused.shape[2:]:
+                ph = F.interpolate(ph.permute(0, 3, 1, 2), size=fused.shape[2:],
+                                   mode="bilinear", align_corners=False).permute(0, 2, 3, 1)
+                # rescale normalized coords: grid is resolution-independent, keep as is
+                ph = ph
+            warped = F.grid_sample(fused, ph, mode="bilinear",
+                                   padding_mode="border", align_corners=False)
+            delta = float((warped - fused).detach().abs().mean())
+        else:
+            warped = fused
+            delta = 0.0
+        feat = self.fuse(warped)  # (TB, dec, H, W)
         feat = F.interpolate(feat, scale_factor=2, mode="bilinear", align_corners=False)
         f_dec = feat + self.refine(feat)  # identity-init boundary refinement
         out_hw = f_dec.shape[-2:]
@@ -109,4 +130,5 @@ class CandidateDecoder(nn.Module):
         fd = f_dec_t.permute(0, 1, 3, 4, 2)  # (T,B,H,W,dec)
         masks = torch.einsum("tbhwD,tbJD->tbJhw", fd, w)
         quality = self.q_head(pooled)  # (T,B,J) logits, 0-init -> 0.5 proba
-        return {"masks": masks, "quality": quality, "F_dec": f_dec_t}
+        return {"masks": masks, "quality": quality, "F_dec": f_dec_t,
+                "flow_delta": torch.tensor(delta)}
