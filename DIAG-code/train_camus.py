@@ -81,6 +81,9 @@ def main():
     ap.add_argument("--max-disp", type=float, default=0.05)
     ap.add_argument("--svf-smooth", type=float, default=0.01)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--ds-lr", type=float, default=1e-4, help="005 sec.1.2 ds head own lr (0=keep no_grad frozen)")
+    ap.add_argument("--norm", action="store_true", help="005 sec.1.1 loss running-mean norm")
+    ap.add_argument("--l-boundary", type=float, default=0.0, help="005 sec.1.4 boundary loss weight")
     ap.add_argument("--l-ce", type=float, default=1.0)
     ap.add_argument("--l-dice", type=float, default=1.0)
     ap.add_argument("--l-rec", type=float, default=0.1)
@@ -104,18 +107,22 @@ def main():
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
     loss_fn = DiagLoss(DiagLossWeights(ce=args.l_ce, dice=args.l_dice, rec=args.l_rec,
                                          smooth=args.l_smooth, flow=args.l_flow,
-                                         iou=args.l_iou), state_dim=C).to(dev)
+                                         iou=args.l_iou,
+                                         boundary=args.l_boundary), state_dim=C, norm=args.norm).to(dev)
     # SVF REMOVED from chain (003 fallback, grid 18/18 negative 2026-10-01):
     # val_dice 0.65-0.73 all-grid, HD95 51-68 collapsed, delta>0 but hurts.
     # svf.py stays as diagnose tool; decoder phi=None default pass-through.
     svf_head = None
     params = list(anchor.parameters()) + list(pclf.parameters()) + list(hdc.parameters()) \
         + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters())
-    opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-2)
+    ds_params = list(ds_head.parameters())
+    main_params = [p for p in params if not any(p is q for q in ds_params)]
+    opt = torch.optim.AdamW(main_params, lr=args.lr, weight_decay=1e-2)
+    opt_ds = torch.optim.AdamW(ds_params, lr=args.ds_lr, weight_decay=0.0) if args.ds_lr > 0 else None
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", patience=5, factor=0.5)
 
     W = {"n": 0, "ce": 0.0, "dice": 0.0, "rec": 0.0, "smooth": 0.0, "flow": 0.0,
-         "iou": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
+         "iou": 0.0, "boundary": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
          "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0,
          "ds_mean": 0.0, "ds_min": 0.0, "svf_delta": 0.0, "svf_smooth": 0.0}
 
@@ -123,7 +130,7 @@ def main():
         # W-step window (002 sec.1): six loss splits + K/gamma/best/alpha + grad norms
         n = max(W["n"], 1)
         mlflow.log_metric(f"wstep/loss_total{suffix}", W["ce"] / n + W["dice"] / n, step=gstep)
-        for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+        for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary"):
             mlflow.log_metric(f"wstep/loss_{k}{suffix}", W[k] / n, step=gstep)
         mlflow.log_metric(f"wstep/k_mean{suffix}", W["k"] / n, step=gstep)
         mlflow.log_metric(f"wstep/gamma_mean{suffix}", W["gamma"] / n, step=gstep)
@@ -141,7 +148,7 @@ def main():
             mlflow.log_metric(f"wstep/best_j{j}{suffix}", W["best"][j] / btot, step=gstep)
 
     def w_reset() -> None:
-        for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "k", "gamma", "gsat",
+        for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary", "k", "gamma", "gsat",
                   "alpha_c", "alpha_f", "gn_pre", "gn_post", "ds_mean", "ds_min",
                   "svf_delta", "svf_smooth"):
             W[k] = 0.0
@@ -169,9 +176,14 @@ def main():
                 aout = anchor(xb)
                 f_tf = aout["F_tf"].unsqueeze(1)  # (T,1,C,H/2,W/2)
                 f_tc = aout["F_tc"].unsqueeze(1)
-                with torch.no_grad():
-                    ds_vec = ds_head(f_tf)  # (B,T-1) learned steps, detached inside
-                dts = ds_vec[0]
+                if opt_ds is not None:
+                    ds_head.train()
+                    ds_vec = ds_head(f_tf)  # detached inside: backbone cut, ds learns
+                    dts = ds_vec[0]
+                else:
+                    with torch.no_grad():
+                        ds_vec = ds_head(f_tf)
+                    dts = ds_vec[0]
                 if args.frame_only:
                     # H1 baseline: no dynamics; decode content features directly.
                     # Q_e zeros keep decoder signature; quality still learns selection.
@@ -200,13 +212,17 @@ def main():
                     out = dict(out)
                     out["total"] = out["total"] + sv_smooth_extra
                 if train:
+                    if opt_ds is not None:
+                        opt_ds.zero_grad()
                     out["total"].backward()
+                    if opt_ds is not None:
+                        opt_ds.step()
                     gn_pre = torch.nn.utils.clip_grad_norm_(params, 1.0)
                     gn_post = sum(p.grad.norm().item() ** 2 for p in params if p.grad is not None) ** 0.5
                     opt.step()
                     # W-step accumulators (train only)
                     W["n"] += 1
-                    for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+                    for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary"):
                         W[k] += float(out[k])
                     kf = pf["fine"]["gates"].detach() if pf is not None else None
                     W["k"] += float(kf.mean()) if kf is not None else 0.0
@@ -247,6 +263,7 @@ def main():
     with mlflow.start_run(run_name=args.run_name) as run:
         mlflow.set_tag("code_sha", code_sha)
         mlflow.set_tag("node", "frame-only-baseline" if args.frame_only else "camus-fullchain-train")
+        mlflow.set_tag("norm", str(bool(args.norm)))
         mlflow.set_tag("backbone", BACKBONE_RECORD["name"] + "-random-init-DEVIATION")
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
         mlflow.set_tag("dts", "ds-head-learned-DEVIATION-fallback-ones")
@@ -304,7 +321,7 @@ def main():
             mlflow.log_metric("train_dice", td, step=ep)
             if W.get("n", 0) > 0:
                 wn = max(W["n"], 1)
-                for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+                for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary"):
                     mlflow.log_metric(f"loss/{k}_ep", W[k] / wn, step=ep)
             mlflow.log_metric("val_loss", vl, step=ep)
             mlflow.log_metric("val_dice", vd, step=ep)
