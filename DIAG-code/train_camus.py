@@ -81,6 +81,12 @@ def main():
     ap.add_argument("--max-disp", type=float, default=0.05)
     ap.add_argument("--svf-smooth", type=float, default=0.01)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--l-ce", type=float, default=1.0)
+    ap.add_argument("--l-dice", type=float, default=1.0)
+    ap.add_argument("--l-rec", type=float, default=0.1)
+    ap.add_argument("--l-smooth", type=float, default=0.01)
+    ap.add_argument("--l-flow", type=float, default=0.1)
+    ap.add_argument("--l-iou", type=float, default=0.5)
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
@@ -96,7 +102,9 @@ def main():
     ds_head = DsHead(C).to(dev)
     hdc = HDC(C, num_queries=4).to(dev)
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
-    loss_fn = DiagLoss(DiagLossWeights(), state_dim=C).to(dev)
+    loss_fn = DiagLoss(DiagLossWeights(ce=args.l_ce, dice=args.l_dice, rec=args.l_rec,
+                                         smooth=args.l_smooth, flow=args.l_flow,
+                                         iou=args.l_iou), state_dim=C).to(dev)
     # SVF REMOVED from chain (003 fallback, grid 18/18 negative 2026-10-01):
     # val_dice 0.65-0.73 all-grid, HD95 51-68 collapsed, delta>0 but hurts.
     # svf.py stays as diagnose tool; decoder phi=None default pass-through.
@@ -292,6 +300,10 @@ def main():
             import numpy as _np
             mlflow.log_metric("train_loss", tl, step=ep)
             mlflow.log_metric("train_dice", td, step=ep)
+            if W.get("n", 0) > 0:
+                wn = max(W["n"], 1)
+                for k in ("ce", "dice", "rec", "smooth", "flow", "iou"):
+                    mlflow.log_metric(f"loss/{k}_ep", W[k] / wn, step=ep)
             mlflow.log_metric("val_loss", vl, step=ep)
             mlflow.log_metric("val_dice", vd, step=ep)
             mlflow.log_metric("lr", opt.param_groups[0]["lr"], step=ep)
