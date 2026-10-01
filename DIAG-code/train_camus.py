@@ -164,9 +164,11 @@ def main():
             if train:
                 opt.zero_grad()
             with torch.set_grad_enabled(train):
-                feats = [anchor(f) for f in x]
-                f_tf = torch.stack([o["F_tf"] for o in feats])
-                f_tc = torch.stack([o["F_tc"] for o in feats])
+                # batched anchor: 10 frames one call (~4x faster than per-frame loop)
+                xb = x.squeeze(1)  # (T,1,H,W) BCHW batch-of-frames
+                aout = anchor(xb)
+                f_tf = aout["F_tf"].unsqueeze(1)  # (T,1,C,H/2,W/2)
+                f_tc = aout["F_tc"].unsqueeze(1)
                 with torch.no_grad():
                     ds_vec = ds_head(f_tf)  # (B,T-1) learned steps, detached inside
                 dts = ds_vec[0]
@@ -279,9 +281,9 @@ def main():
                     xv = xv.to(dev)
                     gs = F.interpolate(gv.flatten(0, 1), size=(256, 256),
                                        mode="nearest").view(10, 1, 1, 256, 256).to(dev)
-                    feats = [anchor(f) for f in xv]
-                    ft = torch.stack([o["F_tf"] for o in feats])
-                    fc = torch.stack([o["F_tc"] for o in feats])
+                    ao = anchor(xv.squeeze(1))
+                    ft = ao["F_tf"].unsqueeze(1)
+                    fc = ao["F_tc"].unsqueeze(1)
                     pfv = pclf.forward(ft, fc, torch.ones(9, device=dev))
                     hov = hdc(ft, pfv["fine"]["states"], pfv["coarse"]["states"])
                     dov = dec(hov["F_e"], hov["P"], hov["Q_e"])
@@ -318,9 +320,9 @@ def main():
                 with torch.no_grad():
                     xv0, _ = load_patient(vids[0])
                     xv0 = xv0.to(dev)
-                    fz = [anchor(f) for f in xv0]
-                    ft0 = torch.stack([o["F_tf"] for o in fz])
-                    fc0 = torch.stack([o["F_tc"] for o in fz])
+                    ao0 = anchor(xv0.squeeze(1))
+                    ft0 = ao0["F_tf"].unsqueeze(1)
+                    fc0 = ao0["F_tc"].unsqueeze(1)
                     pf0 = pclf.forward(ft0, fc0, torch.ones(9, device=dev))
                     ho0 = hdc(ft0, pf0["fine"]["states"], pf0["coarse"]["states"],
                               record_gamma=True)
