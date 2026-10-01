@@ -7,7 +7,7 @@ authors = [
     { email = "tiany@tju.edu.cn" }
 ]
 requires-python = ">=3.11"
-dependencies = ["mlflow>=2", "numpy", "Pillow", "torch"]
+dependencies = ["mlflow>=2", "numpy", "Pillow", "torch", "monai>=1.4", "scipy"]
 
 [project.scripts]
 diag = "diag:main"
