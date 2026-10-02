@@ -130,7 +130,8 @@ def main():
     W = {"n": 0, "ce": 0.0, "dice": 0.0, "rec": 0.0, "smooth": 0.0, "flow": 0.0,
          "iou": 0.0, "boundary": 0.0, "k": 0.0, "gamma": 0.0, "gsat": 0.0,
          "best": [0, 0, 0], "alpha_c": 0.0, "alpha_f": 0.0, "gn_pre": 0.0, "gn_post": 0.0,
-         "ds_mean": 0.0, "ds_min": 0.0, "svf_delta": 0.0, "svf_smooth": 0.0}
+         "ds_mean": 0.0, "ds_min": 0.0, "svf_delta": 0.0, "svf_smooth": 0.0,
+         "obs_n": 0.0, "vf_n": 0.0}
 
     def w_log(suffix: str, gstep: int) -> None:
         # W-step window (002 sec.1): six loss splits + K/gamma/best/alpha + grad norms
@@ -139,6 +140,8 @@ def main():
         for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary"):
             mlflow.log_metric(f"wstep/loss_{k}{suffix}", W[k] / n, step=gstep)
         mlflow.log_metric(f"wstep/k_mean{suffix}", W["k"] / n, step=gstep)
+        mlflow.log_metric(f"wstep/obs_n{suffix}", W.get("obs_n", 0.0) / n, step=gstep)
+        mlflow.log_metric(f"wstep/vf_n{suffix}", W.get("vf_n", 0.0) / n, step=gstep)
         mlflow.log_metric(f"wstep/gamma_mean{suffix}", W["gamma"] / n, step=gstep)
         mlflow.log_metric(f"wstep/gamma_sat{suffix}", W["gsat"] / n, step=gstep)
         mlflow.log_metric(f"wstep/alpha_c{suffix}", W["alpha_c"] / n, step=gstep)
@@ -155,6 +158,7 @@ def main():
 
     def w_reset() -> None:
         for k in ("ce", "dice", "rec", "smooth", "flow", "iou", "boundary", "k", "gamma", "gsat",
+                  "obs_n", "vf_n",
                   "alpha_c", "alpha_f", "gn_pre", "gn_post", "ds_mean", "ds_min",
                   "svf_delta", "svf_smooth"):
             W[k] = 0.0
@@ -234,6 +238,18 @@ def main():
                         W[k] += float(out[k])
                     kf = pf["fine"]["gates"].detach() if pf is not None else None
                     W["k"] += float(kf.mean()) if kf is not None else 0.0
+                    if pf is not None:
+                        # 005-VF diagnosis: Obs vs VectorField output energy ratio.
+                        # If O >> f(S), the gate rationally prefers obs (K->1).
+                        with torch.no_grad():
+                            _s = pf["fine"]["states"][-1].detach()
+                            _o = pf["fine"]["obs"][-1].detach()
+                            _vfmod = pclf.flow_f.vf
+                            _fv = _vfmod(_s.flatten(0, 1)).detach()
+                            _on = _o.flatten(0, 1).pow(2).mean().sqrt()
+                            _vn = _fv.pow(2).mean().sqrt()
+                            W["obs_n"] = W.get("obs_n", 0.0) + float(_on)
+                            W["vf_n"] = W.get("vf_n", 0.0) + float(_vn)
                     gm = ho["gamma"].detach()
                     W["gamma"] += float(gm.mean())
                     W["gsat"] += float((gm > 0.95).float().mean())
