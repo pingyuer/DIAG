@@ -10,7 +10,28 @@ DONE=DIAG-code/queue/done
 FAILED=DIAG-code/queue/failed
 mkdir -p "$PENDING" "$DONE" "$FAILED" outputs/queue
 while true; do
-  task=$(ls "$PENDING"/*.sh 2>/dev/null | head -1 || true)
+  # Runner identity: hostname is stable per container (tahara-<id>-main).
+  # Tasks may be prefixed <id>-<name>.sh to pin a runner; unprefixed or
+  # already-claimed tasks are shared. Claim via atomic mv to done/*.running.
+  ME=$(hostname)
+  task=""
+  for cand in "$PENDING"/*.sh; do
+    [ -e "$cand" ] || continue
+    base=$(basename "$cand" .sh)
+    case "$base" in
+      shared-*|task-*) task="$cand"; break ;;
+    esac
+  done
+  if [ -z "$task" ]; then
+    for cand in "$PENDING"/*.sh; do
+      [ -e "$cand" ] || continue
+      # skip other-runner pins: <otherhost>-*; mine: $ME-* or legacy echo-*
+      base=$(basename "$cand" .sh)
+      case "$base" in
+        "$ME"-*|echo-*) task="$cand"; break ;;
+      esac
+    done
+  fi
   if [ -z "$task" ]; then sleep 30; continue; fi
   name=$(basename "$task" .sh)
   lock="$PENDING/.$name.lock"
