@@ -19,6 +19,7 @@ from diag_metrics import (area_roughness, centroid_drift, dice_score, hd95,
                           hd95_mirror, interframe_dice_variation,
                           patient_average, postprocess_binary_mask)
 from diag.anchoring import ContentAnchor
+from diag.dino_anchor import FrozenDinoAnchor
 from diag.decoder import CandidateDecoder
 from diag.hdc import HDC
 from diag.pclf import PCLF
@@ -48,7 +49,15 @@ def main():
 
     ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)
     print(f"ckpt epoch={ckpt['epoch']} best_val={ckpt['val_dice']:.4f} sha={ckpt.get('code_sha','?')[:8]}", flush=True)
-    anchor = ContentAnchor().eval()
+    import argparse as _ap
+    _parser = _ap.ArgumentParser()
+    _parser.add_argument("--anchor", default="unext")
+    _eargs, _ = _parser.parse_known_args()
+    _anchor_name = _eargs.anchor
+    if _anchor_name == "unext":
+        anchor = ContentAnchor().eval()
+    else:
+        anchor = FrozenDinoAnchor(_anchor_name, out_channels=96).eval()
     C = anchor.out_channels
     pclf = PCLF(C).eval()
     hdc = HDC(C, num_queries=4).eval()
@@ -62,6 +71,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sweep", action="store_true", help="threshold sweep 0.30-0.75 on probs")
     ap.add_argument("--postprocess", action="store_true", help="upstream postprocess on masks")
+    ap.add_argument("--anchor", default="unext")
     ap.add_argument("--hd95-mirror", action="store_true", dest="mirror",
                     help="report MONAI-mirror HD95 alongside cdist")
     a = ap.parse_args()
