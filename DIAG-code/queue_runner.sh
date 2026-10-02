@@ -9,7 +9,10 @@ PENDING=DIAG-code/queue/pending
 DONE=DIAG-code/queue/done
 FAILED=DIAG-code/queue/failed
 mkdir -p "$PENDING" "$DONE" "$FAILED" outputs/queue
+# pull latest tasks each loop (no ssh needed to feed the queue)
+git pull -q 2>/dev/null || true
 while true; do
+  git pull -q 2>/dev/null || true
   # Runner identity: hostname is stable per container (tahara-<id>-main).
   # Tasks may be prefixed <id>-<name>.sh to pin a runner; unprefixed or
   # already-claimed tasks are shared. Claim via atomic mv to done/*.running.
