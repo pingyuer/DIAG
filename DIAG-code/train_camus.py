@@ -242,11 +242,10 @@ def main():
                         # 005-VF diagnosis: Obs vs VectorField output energy ratio.
                         # If O >> f(S), the gate rationally prefers obs (K->1).
                         with torch.no_grad():
-                            _s = pf["fine"]["states"][-1].detach()
+                            _s = pf["fine"]["states"][-1].detach()  # (B,C,H,W)
                             _o = pf["fine"]["obs"][-1].detach()
-                            _vfmod = pclf.flow_f.vf
-                            _fv = _vfmod(_s.flatten(0, 1)).detach()
-                            _on = _o.flatten(0, 1).pow(2).mean().sqrt()
+                            _fv = pclf.flow_f.vf(_s).detach()
+                            _on = _o.pow(2).mean().sqrt()
                             _vn = _fv.pow(2).mean().sqrt()
                             W["obs_n"] = W.get("obs_n", 0.0) + float(_on)
                             W["vf_n"] = W.get("vf_n", 0.0) + float(_vn)

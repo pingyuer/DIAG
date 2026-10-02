@@ -43,7 +43,8 @@ while true; do
     echo "[$(date -Is)] DONE $name" | tee -a "outputs/queue/$name.log"
     mv "$DONE/$name.sh.running" "$DONE/$name.sh"
   else
-    echo "[$(date -Is)] FAILED $name rc=$?" | tee -a "outputs/queue/$name.log"
+    rc=$?
+    echo "[$(date -Is)] FAILED $name rc=$rc" | tee -a "outputs/queue/$name.log"
     mv "$DONE/$name.sh.running" "$FAILED/$name.sh"
   fi
   exec 9>&-
