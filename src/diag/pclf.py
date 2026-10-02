@@ -51,14 +51,27 @@ class ObsEncoder(nn.Module):
 class VectorField(nn.Module):
     """f^q_phi: conv dynamics vector field S -> dS/dt (RHS of Eq.7)."""
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, deep: bool = False) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(channels, channels, 3, padding=1, bias=False),
-            nn.GroupNorm(_groups(channels), channels),
-            nn.GELU(),
-            nn.Conv2d(channels, channels, 3, padding=1),
-        )
+        # (a) deep: extra 3x3-GN-GELU block; last layer zero-init kept
+        # (identity start preserved: deeper net still outputs ~0 at init).
+        if deep:
+            self.net = nn.Sequential(
+                nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+                nn.GroupNorm(_groups(channels), channels),
+                nn.GELU(),
+                nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+                nn.GroupNorm(_groups(channels), channels),
+                nn.GELU(),
+                nn.Conv2d(channels, channels, 3, padding=1),
+            )
+        else:
+            self.net = nn.Sequential(
+                nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+                nn.GroupNorm(_groups(channels), channels),
+                nn.GELU(),
+                nn.Conv2d(channels, channels, 3, padding=1),
+            )
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
 
@@ -69,22 +82,30 @@ class VectorField(nn.Module):
 class CorrectGate(nn.Module):
     """C^q: correction gate K = sigmoid(C([Sbar, O])) (Eq.8)."""
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, temperature: float = 1.0) -> None:
         super().__init__()
         self.net = nn.Conv2d(2 * channels, channels, 1)
+        # (c) temperature: sigmoid(x/T); T<1 sharpens the gate (more decisive).
+        self.temperature = float(temperature)
 
     def forward(self, s_bar: torch.Tensor, o: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.net(torch.cat([s_bar, o], dim=1)))
+        return torch.sigmoid(self.net(torch.cat([s_bar, o], dim=1)) / self.temperature)
 
 
 class ScaleFlow(nn.Module):
     """Single-scale causal recurrence: forward(feats[T], dts[T-1]) -> states[T]."""
 
-    def __init__(self, channels: int) -> None:
+    def __init__(self, channels: int, vf_deep: bool = False, k_temp: float = 1.0,
+                 balance: bool = False) -> None:
         super().__init__()
         self.obs = ObsEncoder(channels)
-        self.vf = VectorField(channels)
-        self.gate = CorrectGate(channels)
+        self.vf = VectorField(channels, deep=vf_deep)
+        self.gate = CorrectGate(channels, temperature=k_temp)
+        # (b) balance: LayerNorm aligns Obs/VF output energy so the gate
+        # compares like with like instead of raw magnitudes.
+        self.balance = bool(balance)
+        self.obs_norm = nn.LayerNorm(channels) if balance else None
+        self.vf_norm = nn.LayerNorm(channels) if balance else None
 
     def forward(
         self, feats: torch.Tensor, dts: torch.Tensor | float = 1.0
@@ -103,9 +124,19 @@ class ScaleFlow(nn.Module):
         else:
             dts = torch.full((max(t - 1, 0),), float(dts), dtype=feats.dtype, device=feats.device)
         obs = torch.stack([self.obs(f) for f in feats])  # (T,B,C,H,W)
+        if self.balance:
+            # per-location channel LayerNorm: energy alignment
+            t_, b_, c_, h_, w_ = obs.shape
+            tb = obs.permute(0, 1, 3, 4, 2).reshape(t_ * b_ * h_ * w_, c_)
+            obs = self.obs_norm(tb).reshape(t_, b_, h_, w_, c_).permute(0, 1, 4, 2, 3)
         states, preds, gates = [obs[0]], [], []
         for i in range(1, t):
-            s_bar = states[-1] + dts[i - 1] * self.vf(states[-1])  # Eq.7 Euler
+            vf_out = self.vf(states[-1])
+            if self.balance:
+                b_, c_, h_, w_ = vf_out.shape
+                tb = vf_out.permute(0, 2, 3, 1).reshape(b_ * h_ * w_, c_)
+                vf_out = self.vf_norm(tb).reshape(b_, h_, w_, c_).permute(0, 3, 1, 2)
+            s_bar = states[-1] + dts[i - 1] * vf_out  # Eq.7 Euler
             k = self.gate(s_bar, obs[i])  # Eq.8
             s = (1 - k) * s_bar + k * obs[i]  # Eq.9
             preds.append(s_bar)
@@ -124,10 +155,14 @@ class ScaleFlow(nn.Module):
 class PCLF(nn.Module):
     """Dual-scale PCLF: forward(F_tf[T], F_tc[T], dts) -> z_t=(S_tc, S_tf)."""
 
-    def __init__(self, channels_fine: int, channels_coarse: int | None = None) -> None:
+    def __init__(self, channels_fine: int, channels_coarse: int | None = None,
+                 vf_deep: bool = False, k_temp: float = 1.0,
+                 balance: bool = False) -> None:
         super().__init__()
-        self.flow_f = ScaleFlow(channels_fine)
-        self.flow_c = ScaleFlow(channels_coarse or channels_fine)
+        self.flow_f = ScaleFlow(channels_fine, vf_deep=vf_deep, k_temp=k_temp,
+                                balance=balance)
+        self.flow_c = ScaleFlow(channels_coarse or channels_fine, vf_deep=vf_deep,
+                                k_temp=k_temp, balance=balance)
 
     def forward(
         self,

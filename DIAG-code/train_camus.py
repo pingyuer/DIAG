@@ -82,6 +82,9 @@ def main():
     ap.add_argument("--svf-smooth", type=float, default=0.01)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ds-lr", type=float, default=1e-4, help="005 sec.1.2 ds head own lr (0=keep no_grad frozen)")
+    ap.add_argument("--vf-deep", action="store_true", help="VF(a): deeper vector field")
+    ap.add_argument("--vf-balance", action="store_true", help="VF(b): Obs/VF energy balance")
+    ap.add_argument("--k-temp", type=float, default=1.0, help="VF(c): gate temperature")
     ap.add_argument("--norm", action="store_true", help="005 sec.1.1 loss running-mean norm")
     ap.add_argument("--l-boundary", type=float, default=0.0, help="005 sec.1.4 boundary loss weight")
     ap.add_argument("--l-ce", type=float, default=1.0)
@@ -107,7 +110,8 @@ def main():
         from diag.dino_anchor import FrozenDinoAnchor
         anchor = FrozenDinoAnchor(args.anchor, out_channels=96).to(dev)
     C = anchor.out_channels
-    pclf = PCLF(C).to(dev)
+    pclf = PCLF(C, vf_deep=args.vf_deep, k_temp=args.k_temp,
+                balance=args.vf_balance).to(dev)
     ds_head = DsHead(C).to(dev)
     hdc = HDC(C, num_queries=4).to(dev)
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).to(dev)
@@ -287,6 +291,9 @@ def main():
         mlflow.set_tag("code_sha", code_sha)
         mlflow.set_tag("node", "frame-only-baseline" if args.frame_only else "camus-fullchain-train")
         mlflow.set_tag("norm", str(bool(args.norm)))
+        mlflow.set_tag("vf_deep", str(bool(args.vf_deep)))
+        mlflow.set_tag("vf_balance", str(bool(args.vf_balance)))
+        mlflow.set_tag("k_temp", str(args.k_temp))
         mlflow.set_tag("backbone", args.anchor + ("-random-init-DEVIATION" if args.anchor == "unext" else "-frozen-pretrained"))
         mlflow.set_tag("lambda", "placeholder-supplement-pending-DEVIATION")
         mlflow.set_tag("dts", "ds-head-learned-DEVIATION-fallback-ones")
