@@ -126,9 +126,13 @@ class DensePromptHead(nn.Module):
 class RegionTokenHead(nn.Module):
     """HDC-C: K queries attend to flattened state; Q^e = Q_0 + a_c*T_c + a_f*T_f."""
 
-    def __init__(self, state_dim: int, num_queries: int = 4, alpha_init: float = -2.0) -> None:
+    def __init__(self, state_dim: int, num_queries: int = 4, alpha_init: float = -2.0,
+                 detach_s: bool = True) -> None:
         super().__init__()
         self.dim = state_dim
+        # 006 grid2: detach on/off ablation switch. True = one-sided detach
+        # (S gets no region-path gradients); False = full backprop into S.
+        self.detach_s = bool(detach_s)
         self.queries = nn.Parameter(torch.empty(num_queries, state_dim))
         nn.init.trunc_normal_(self.queries, std=0.02)
         self.k_proj = nn.Linear(state_dim, state_dim)
@@ -143,7 +147,7 @@ class RegionTokenHead(nn.Module):
         # k/v would drag the dynamics state toward single-frame shortcuts.
         # Queries keep gradients (they must learn region prototypes); S does
         # not receive region-path gradients (it learns from gates + rec/flow).
-        seq_sg = seq.detach()
+        seq_sg = seq.detach() if self.detach_s else seq
         k = self.k_proj(seq_sg)
         v = self.v_proj(seq_sg)
         q = self.queries.unsqueeze(0).expand(b, -1, -1)  # (B, K, C)
@@ -164,14 +168,18 @@ class HDC(nn.Module):
         num_queries: int = 4,
         gamma_bias_init: float = 2.0,
         alpha_init: float = -2.0,
+        detach_region_s: bool = True,
     ) -> None:
         super().__init__()
         coarse = state_dim_coarse or state_dim_fine
         feat = feat_dim or state_dim_fine
         self.gate = AffineGate(state_dim_fine, feat, gamma_bias_init)
         self.prompt = DensePromptHead(state_dim_fine, coarse, prompt_dim or feat, prompt_hw)
-        self.region_f = RegionTokenHead(state_dim_fine, num_queries)
-        self.region_c = RegionTokenHead(coarse, num_queries)
+        self.detach_region_s = bool(detach_region_s)
+        self.region_f = RegionTokenHead(state_dim_fine, num_queries,
+                                        detach_s=self.detach_region_s)
+        self.region_c = RegionTokenHead(coarse, num_queries,
+                                        detach_s=self.detach_region_s)
         token_dim = state_dim_fine
         assert coarse == state_dim_fine, (
             "region tokens require matching fine/coarse dims for shared Q_0; "
