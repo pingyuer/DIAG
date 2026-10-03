@@ -17,14 +17,16 @@ while true; do
   # Tasks may be prefixed <id>-<name>.sh to pin a runner; unprefixed or
   # already-claimed tasks are shared. Claim via atomic mv to done/*.running.
   ME=$(hostname)
-  # OWNER-PREFIX protocol (fix double-claim 2026-10-02): task files MUST be
-  # named <owner>-<name>.sh where owner is a runner hostname prefix or
-  # "shared". A runner ONLY takes tasks matching its hostname prefix or
-  # "shared". Cross-runner dup happened because task-* matched everyone and
-  # per-container git clones diverge (claim is local mv, invisible to peer
-  # until next pull). shared-* still races; use only for idempotent tasks.
+  # CLAIM SEMANTICS, locked 2026-10-02 (option B: central exclusion):
+  # - ONLY <my-hostname>-*.sh tasks are mine. No shared/broadcast prefix.
+  #   Rationale: per-container git clones diverge, so a local mv claim is
+  #   invisible to the peer until its next pull; any shared pattern races
+  #   (verified double-run 2026-10-02). Broadcast = submit one file per
+  #   runner, never one file for both.
+  # - Training tasks MUST be hostname-pinned (spec). Unprefixed files are
+  #   IGNORED (not picked up by anyone) to fail loud, not double-run.
   task=""
-  for cand in "$PENDING"/"$ME"-*.sh "$PENDING"/shared-*.sh; do
+  for cand in "$PENDING"/"$ME"-*.sh; do
     [ -e "$cand" ] || continue
     task="$cand"; break
   done
