@@ -66,7 +66,9 @@ def main():
     else:
         anchor = FrozenDinoAnchor(_anchor_name, out_channels=96).eval()
     C = anchor.out_channels
-    pclf = PCLF(C).eval()
+    _deep = any(k.startswith("flow_f.vf.net.6") or k.startswith("flow_f.vf.net.4") for k in ckpt["pclf"])
+    pclf = PCLF(C, vf_deep=_deep).eval()
+    print(f"vf_deep={_deep} (inferred from ckpt)", flush=True)
     hdc = HDC(C, num_queries=4).eval()
     dec = CandidateDecoder(feat_dim=C, num_queries=4, num_candidates=3).eval()
     anchor.load_state_dict(ckpt["anchor"])
