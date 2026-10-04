@@ -106,7 +106,7 @@ def main():
     ap.add_argument("--l-flow", type=float, default=0.1)
     ap.add_argument("--l-iou", type=float, default=0.5)
     ap.add_argument("--anchor", default="unext",
-                    help="unext|dinov2-small|dinov2-base (008 frozen pretrained)")
+                    help="unext|dinov2-small|dinov2-base|medsam|sam (008 frozen)")
     args = ap.parse_args()
 
     dev = torch.device("cuda:0")
@@ -118,9 +118,12 @@ def main():
 
     if args.anchor == "unext":
         anchor = ContentAnchor().to(dev)
-    else:
+    elif args.anchor in ("dinov2-small", "dinov2-base"):
         from diag.dino_anchor import FrozenDinoAnchor
         anchor = FrozenDinoAnchor(args.anchor, out_channels=96).to(dev)
+    else:
+        from diag.sam_anchor import FrozenSamAnchor
+        anchor = FrozenSamAnchor(args.anchor, out_channels=96).to(dev)
     C = anchor.out_channels
     pclf = PCLF(C, vf_deep=args.vf_deep, k_temp=args.k_temp,
                 balance=args.vf_balance).to(dev)
