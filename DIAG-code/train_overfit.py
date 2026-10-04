@@ -15,12 +15,12 @@ from pathlib import Path
 
 import mlflow
 import torch
-import torch.nn.functional as F
 
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
-from diag.anchoring import BACKBONE_RECORD, ContentAnchor
+
+from diag.anchoring import ContentAnchor
 from diag.data_camus import DEVIATIONS, load_patient
 from diag.decoder import CandidateDecoder
 from diag.hdc import HDC
@@ -65,7 +65,7 @@ def main():
         sha = Path(".code_sha").read_text().strip()
     except OSError:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True).stdout.strip()
+                             capture_output=True, text=True, check=False).stdout.strip()
     mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment("diag-camus-train")
     t0 = time.time()

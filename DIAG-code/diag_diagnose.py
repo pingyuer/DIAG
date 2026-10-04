@@ -26,9 +26,8 @@ model_fn contract: (frames (T,B,1,H,W), dts (T-1,)) -> pred_masks (T,B,1,Hf,Wf).
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
-
 from diag_metrics import dice_score
+
 
 def phase_r2(states: torch.Tensor, areas: torch.Tensor) -> dict[str, float]:
     """Least-squares R^2 of LV area from PC1 of flattened states."""
@@ -49,8 +48,13 @@ def phase_r2(states: torch.Tensor, areas: torch.Tensor) -> dict[str, float]:
     return {"r2": sum(r2s) / len(r2s)}
 
 
+from collections.abc import Callable as _Callable
+
+ModelFn = _Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+
+
 def state_intervention(
-    model_fn, frames: torch.Tensor, dts: torch.Tensor, gt: torch.Tensor,
+    model_fn: ModelFn, frames: torch.Tensor, dts: torch.Tensor, gt: torch.Tensor,
     noise_std: float = 1.0, seed: int = 0,
 ) -> dict[str, float]:
     """Clean Dice vs shuffled-state / noisy-state Dice (proves state use)."""
@@ -101,7 +105,7 @@ def compose_ordered_vs_shuffled(
             "ratio": err_sh / max(err_ord, 1e-12)}
 
 
-def sampling_stress(model_fn, frames: torch.Tensor, dts: torch.Tensor,
+def sampling_stress(model_fn: ModelFn, frames: torch.Tensor, dts: torch.Tensor,
                     gt: torch.Tensor, seed: int = 0) -> dict[str, float]:
     """Fig.5 pressure: 5f / 3f / 70% drop / 40% jitter retention vs full."""
     g = torch.Generator().manual_seed(seed)

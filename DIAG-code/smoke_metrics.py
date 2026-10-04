@@ -15,8 +15,13 @@ from PIL import Image
 
 sys.path.insert(0, "DIAG-code")
 from diag_diagnose import phase_r2, sampling_stress
-from diag_metrics import (area_roughness, centroid_drift, dice_score, hd95,
-                          interframe_dice_variation)
+from diag_metrics import (
+    area_roughness,
+    centroid_drift,
+    dice_score,
+    hd95,
+    interframe_dice_variation,
+)
 
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
@@ -42,7 +47,7 @@ def fetch():
                 shell=True, check=True)
 
 
-def load(p):
+def load(p: str) -> tuple[torch.Tensor, torch.Tensor]:
     imgs = sorted((LOCAL / p / "img").glob("*.png"))[:10]
     gts = sorted((LOCAL / p / "gt_lv").glob("*.png"))[:10]
     x = torch.stack([torch.from_numpy(np.asarray(Image.open(f))).float().div(255) for f in imgs]).unsqueeze(1)
@@ -58,7 +63,7 @@ def main():
     hdc = HDC(anchor.out_channels, num_queries=4).eval()
     dec = CandidateDecoder(feat_dim=anchor.out_channels, num_queries=4, num_candidates=3).eval()
 
-    def model_fn(frames, dts):
+    def model_fn(frames: torch.Tensor, dts: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             feats = [anchor(f.unsqueeze(0)) for f in frames]
             f_tf = torch.stack([o["F_tf"] for o in feats])

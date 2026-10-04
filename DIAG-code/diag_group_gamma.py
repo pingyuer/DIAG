@@ -8,7 +8,6 @@ single ckpt single run is ONE data point, not a verdict. So: THREE ckpts
 3. Latent hooks: cross-time swap + gaussian collapse, Dice drop.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -20,11 +19,12 @@ from PIL import Image
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
+
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.dino_anchor import FrozenDinoAnchor
 from diag.ds_head import DsHead
-from diag.hdc import HDC, adjacent_ratio_cv
+from diag.hdc import HDC
 from diag.pclf import PCLF
 
 MLFLOW_URI = "http://172.16.240.77:5000"
@@ -63,7 +63,10 @@ def build(ckpt_path: str, anchor_name: str):
     return anchor, pclf, hdc, dec, ds_head, ckpt
 
 
-def run_chain(anchor, pclf, hdc, dec, ds_head, x, states_override=None):
+def run_chain(anchor: torch.nn.Module, pclf: torch.nn.Module, hdc: torch.nn.Module,
+                dec: torch.nn.Module, ds_head: torch.nn.Module, x: torch.Tensor,
+                states_override: torch.Tensor | None = None
+                ) -> tuple[torch.Tensor, dict[str, dict[str, torch.Tensor]], dict[str, torch.Tensor]]:
     with torch.no_grad():
         feats = [anchor(f) for f in x]
         f_tf = torch.stack([o["F_tf"] for o in feats])

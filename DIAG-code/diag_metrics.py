@@ -103,7 +103,7 @@ def hd95(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def centroid(mask: torch.Tensor) -> torch.Tensor:
     """Center of mass (..., 2) in (y, x); NaN if empty (caller filters)."""
     m = mask.float()
-    *batch, h, w = m.shape
+    *_batch, h, w = m.shape
     ys = torch.arange(h, device=m.device, dtype=m.dtype)
     xs = torch.arange(w, device=m.device, dtype=m.dtype)
     area = m.sum(dim=(-2, -1))
@@ -162,8 +162,8 @@ def hd95_mirror(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     MONAI HausdorffDistanceMetric(percentile=95); non-finite -> max_dim.
     Original cdist hd95() kept for cross-check; this one is the reporting one.
     """
-    from monai.metrics import HausdorffDistanceMetric
     import numpy as np
+    from monai.metrics import HausdorffDistanceMetric
 
     p, t = pred.float(), target.float()
     *batch, h, w = p.shape
@@ -202,9 +202,8 @@ def postprocess_binary_mask(
     Largest component + fill holes + remove small + binary closing (3x3).
     Upstream gates behind cfg flag (default off); eval turns it on explicitly.
     """
-    from scipy import ndimage
-
     import numpy as np
+    from scipy import ndimage
 
     structure = np.ones((3, 3), dtype=bool)
     arr = mask.detach().cpu().numpy().astype(bool)
@@ -230,8 +229,10 @@ def postprocess_binary_mask(
                 counts = np.bincount(labels.ravel())
                 keep = counts >= min_size
                 keep[0] = False
+                assert isinstance(labels, np.ndarray)
                 item = keep[labels]
         if binary_closing:
             item = ndimage.binary_closing(item, structure=structure)
+        assert isinstance(item, np.ndarray)
         flat_out[idx] = item.astype(np.float32)
     return torch.as_tensor(out, device=mask.device, dtype=mask.dtype)

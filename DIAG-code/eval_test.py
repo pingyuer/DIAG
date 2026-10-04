@@ -10,23 +10,30 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
-from diag_metrics import (area_roughness, centroid_drift, dice_score, hd95,
-                          hd95_mirror, interframe_dice_variation,
-                          patient_average, postprocess_binary_mask)
+from diag_metrics import (
+    area_roughness,
+    centroid_drift,
+    dice_score,
+    hd95,
+    hd95_mirror,
+    interframe_dice_variation,
+    postprocess_binary_mask,
+)
+
 from diag.anchoring import ContentAnchor
-from diag.dino_anchor import FrozenDinoAnchor
 from diag.decoder import CandidateDecoder
+from diag.dino_anchor import FrozenDinoAnchor
 from diag.hdc import HDC
 from diag.pclf import PCLF
 
 DATA = Path("outputs/camus_test_pull")  # scp target; fallback remote path first
 REMOTE = "root@172.16.240.188:/input0/processed/camus_png256_10f"
 import os
+
 CKPT = Path(os.environ.get("DIAG_CKPT", "outputs/remote-31035/camus_train/dsfull_best.pt"))
 
 
@@ -93,7 +100,7 @@ def main():
         d = DATA / pid
         if not (d / "img").exists():
             subprocess.run(f"scp -o BatchMode=yes -q -P 32237 -r {REMOTE}/img/{pid} {REMOTE}/gt_lv/{pid} {d}/ 2>/dev/null; mkdir -p {d}/img {d}/gt_lv; scp -o BatchMode=yes -q -P 32237 {REMOTE}/img/{pid}/*.png {d}/img/; scp -o BatchMode=yes -q -P 32237 {REMOTE}/gt_lv/{pid}/*.png {d}/gt_lv/",
-                           shell=True)
+                           shell=True, check=False)
         imgs = sorted((d / "img").glob("*.png"))[:10]
         gts = sorted((d / "gt_lv").glob("*.png"))[:10]
         if len(imgs) < 10:
@@ -159,7 +166,6 @@ def main():
     # R1: true patient ids (arange repeat, NOT hash): per-patient mean then mean.
     # R2(a): first/last-frame naming (NOT ED/ES; ED/ES needs official metadata).
     n_pat = len(per_frame)
-    pid_idx = torch.arange(n_pat).repeat_interleave(10)
     per_pat_dice = torch.stack([per_frame[i].mean() for i in range(n_pat)])
     print(f"frame-mean dice={float(pf.mean()):.4f}", flush=True)
     print(f"patient-avg dice={float(per_pat_dice.mean()):.4f}", flush=True)
@@ -167,11 +173,12 @@ def main():
     print(f"last-frame dice={float(torch.stack([per_frame[i][-1].mean() for i in range(n_pat)]).mean()):.4f}", flush=True)
     # 008-2 hard slices: ES-proxy (min-area frame) / small-cavity / boundary band.
     # Full-mean saturates at 0.91; slices separate the pack.
-    es_d, small_d, band_d, es_n, small_n = [], [], [], 0, 0
+    es_d, small_d, es_n, small_n = [], [], 0, 0
     for i in range(n_pat):
         pass  # filled below (needs probs+gts per patient; see all_probs/all_gts)
-    P_all = torch.cat(all_probs) if all_probs else None
-    G_all = torch.cat(all_gts).squeeze(1).squeeze(1) if all_gts else None
+    assert all_probs and all_gts, "no patients evaluated"
+    P_all = torch.cat(all_probs)
+    G_all = torch.cat(all_gts).squeeze(1).squeeze(1)
     if P_all is not None:
         areas = G_all.reshape(-1, 10, 256, 256).sum(dim=(2, 3))  # (P,10)
         es_idx = areas.argmin(dim=1)

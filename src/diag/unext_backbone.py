@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 def _group_count(channels: int, preferred: int = 8) -> int:
@@ -10,7 +10,7 @@ def _group_count(channels: int, preferred: int = 8) -> int:
 
 
 def map_to_token(x: torch.Tensor) -> tuple[torch.Tensor, int, int]:
-    B, C, H, W = x.shape
+    _B, _C, H, W = x.shape
     return x.flatten(2).transpose(1, 2).contiguous(), H, W
 
 

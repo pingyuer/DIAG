@@ -1,0 +1,30 @@
+{
+  "typeCheckingMode": "basic",
+  "include": [
+    "src/diag",
+    "DIAG-code"
+  ],
+  "exclude": [
+    "upstream_BanditPM",
+    ".venv",
+    "**/__pycache__"
+  ],
+  "reportImplicitRelativeImport": false,
+  "reportMissingParameterType": true,
+  "reportUnknownParameterType": true,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportAny": false,
+  "reportUnannotatedClassAttribute": false,
+  "reportUnusedCallResult": false,
+  "reportArgumentType": false,
+  "reportCallIssue": false,
+  "reportOperatorIssue": false,
+  "reportGeneralTypeIssues": false,
+  "reportPrivateImportUsage": false,
+  "reportAttributeAccessIssue": false,
+  "reportReturnType": true,
+  "reportOptionalMemberAccess": true,
+  "reportOptionalSubscript": true
+}

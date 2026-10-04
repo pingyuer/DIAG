@@ -22,6 +22,7 @@ from PIL import Image
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
+
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.ds_head import DsHead
@@ -42,7 +43,9 @@ def load_clip(pid: str):
     return x, (g > 0.5).float()
 
 
-def infer(anchor, pclf, hdc, dec, ds_head, x, use_ds: bool):
+def infer(anchor: torch.nn.Module, pclf: torch.nn.Module, hdc: torch.nn.Module,
+            dec: torch.nn.Module, ds_head: torch.nn.Module, x: torch.Tensor, use_ds: bool
+            ) -> tuple[torch.Tensor, torch.Tensor]:
     with torch.no_grad():
         feats = [anchor(f) for f in x]
         f_tf = torch.stack([o["F_tf"] for o in feats])

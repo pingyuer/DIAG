@@ -9,7 +9,6 @@ seed before promotion. All params + code_sha + split md5 + seed logged.
 import itertools
 import subprocess
 import sys
-from pathlib import Path
 
 GRID = {
     "ss_steps": [4, 6, 8],

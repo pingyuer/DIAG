@@ -25,7 +25,7 @@ Design:
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def _groups(channels: int, preferred: int = 8) -> int:
@@ -122,20 +122,25 @@ class ScaleFlow(nn.Module):
             if dts.numel() == 1:
                 dts = dts.expand(max(t - 1, 0))
         else:
-            dts = torch.full((max(t - 1, 0),), float(dts), dtype=feats.dtype, device=feats.device)
+            dts_t: torch.Tensor = torch.full(
+                (max(t - 1, 0),), float(dts), dtype=feats.dtype, device=feats.device)
+            dts = dts_t
         obs = torch.stack([self.obs(f) for f in feats])  # (T,B,C,H,W)
-        if self.balance:
+        _obs_norm: nn.LayerNorm | None = self.obs_norm
+        _vf_norm: nn.LayerNorm | None = self.vf_norm
+        if self.balance and _obs_norm is not None:
             # per-location channel LayerNorm: energy alignment
             t_, b_, c_, h_, w_ = obs.shape
             tb = obs.permute(0, 1, 3, 4, 2).reshape(t_ * b_ * h_ * w_, c_)
-            obs = self.obs_norm(tb).reshape(t_, b_, h_, w_, c_).permute(0, 1, 4, 2, 3)
+            obs = _obs_norm(tb).reshape(t_, b_, h_, w_, c_).permute(0, 1, 4, 2, 3)
         states, preds, gates = [obs[0]], [], []
         for i in range(1, t):
             vf_out = self.vf(states[-1])
-            if self.balance:
+            if self.balance and _vf_norm is not None:
                 b_, c_, h_, w_ = vf_out.shape
                 tb = vf_out.permute(0, 2, 3, 1).reshape(b_ * h_ * w_, c_)
-                vf_out = self.vf_norm(tb).reshape(b_, h_, w_, c_).permute(0, 3, 1, 2)
+                vf_out = _vf_norm(tb).reshape(b_, h_, w_, c_).permute(0, 3, 1, 2)
+            assert isinstance(dts, torch.Tensor)
             s_bar = states[-1] + dts[i - 1] * vf_out  # Eq.7 Euler
             k = self.gate(s_bar, obs[i])  # Eq.8
             s = (1 - k) * s_bar + k * obs[i]  # Eq.9

@@ -37,7 +37,7 @@ def main():
     print(f"F_tf={tuple(f_tf.shape)} F_tc={tuple(f_tc.shape)} Down==F_tc maxdiff={maxdiff}", flush=True)
     print(f"params={n_params} time={dt:.2f}s backbone={BACKBONE_RECORD['name']}", flush=True)
 
-    code_sha = subprocess.run(
+    _code_sha = subprocess.run(
         ["./DIAG-code/sync.sh", "sha"], capture_output=True, text=True, check=True
     )
     sha = Path(".code_sha").read_text().strip()

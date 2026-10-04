@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -43,11 +42,12 @@ W_THRESHOLDS = {  # O1-O10 watch table (002 sec.2); written as run tags
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
-from diag.anchoring import BACKBONE_RECORD, ContentAnchor
+
+from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
+from diag.ds_head import DsHead
 from diag.hdc import HDC
 from diag.losses import DiagLoss, DiagLossWeights
-from diag.ds_head import DsHead
 from diag.pclf import PCLF
 
 DATA = Path("/input0/processed/camus_png256_10f")
@@ -55,7 +55,7 @@ OUT = Path(__import__("os").environ.get("DIAG_OUT", "/root/DIAG/outputs/camus_tr
 MLFLOW_URI = "http://172.16.240.77:5000"
 
 
-_CACHE: dict[str, tuple] = {}
+_CACHE: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
 
 def load_patient(p: str, cache: bool = True):
@@ -138,7 +138,7 @@ def main():
     # SVF REMOVED from chain (003 fallback, grid 18/18 negative 2026-10-01):
     # val_dice 0.65-0.73 all-grid, HD95 51-68 collapsed, delta>0 but hurts.
     # svf.py stays as diagnose tool; decoder phi=None default pass-through.
-    svf_head = None
+    _svf_head = None
     params = list(anchor.parameters()) + list(pclf.parameters()) + list(hdc.parameters()) \
         + list(dec.parameters()) + list(loss_fn.parameters()) + list(ds_head.parameters())
     ds_params = list(ds_head.parameters())
@@ -323,8 +323,12 @@ def main():
         mlflow.log_param("val_n", len(val_ids))
         best_val = 0.0
         gstep = [0]
-        from diag_metrics import (area_roughness, centroid_drift, hd95,
-                                  interframe_dice_variation)
+        from diag_metrics import (
+            area_roughness,
+            centroid_drift,
+            hd95,
+            interframe_dice_variation,
+        )
         vids = val_ids[:8]  # W-epoch temporal/HD95 subset (cost control)
         for ep in range(args.epochs):
             tl_acc, td_acc, nb = 0.0, 0.0, 0

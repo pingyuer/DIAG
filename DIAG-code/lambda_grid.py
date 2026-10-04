@@ -8,7 +8,6 @@ loss/*_ep splits. Best dims -> stage-2 refine (separate node).
 Budget guard: >19 runs stops. Best point seed-rerun before any citation.
 """
 import subprocess
-import sys
 
 CENTER = {"ce": 1.0, "dice": 1.0, "rec": 0.1, "smooth": 0.01, "flow": 0.1, "iou": 0.5}
 LEVELS = [0.01, 0.1, 1.0]
@@ -21,9 +20,9 @@ FLAG = {"ce": "--l-ce", "dice": "--l-dice", "rec": "--l-rec",
 
 def main():
     combos = [("center", dict(CENTER))]
-    for dim in CENTER:
+    for dim, center_val in CENTER.items():
         for lv in LEVELS:
-            if lv == CENTER[dim]:
+            if lv == center_val:
                 continue
             w = dict(CENTER)
             w[dim] = lv

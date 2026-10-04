@@ -39,8 +39,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 @dataclass
@@ -153,7 +153,7 @@ class DiagLoss(nn.Module):
 
         # flow: S_t predicts F_{t+1} (training-only next-frame supervision).
         # (T-1,B,C,H,W) -> merge to 4D, probe, compare.
-        tb, c, hs, ws = states_f.shape[1], states_f.shape[2], states_f.shape[3], states_f.shape[4]
+        _tb, c, hs, ws = states_f.shape[1], states_f.shape[2], states_f.shape[3], states_f.shape[4]
         pred = self.flow_probe(states_f[:-1].reshape((t - 1) * b, c, hs, ws))
         l_flow = F.mse_loss(pred, feats_f[1:].reshape((t - 1) * b, c, hs, ws))
         l_boundary = boundary_loss(win, tgt)
@@ -161,7 +161,7 @@ class DiagLoss(nn.Module):
         if self.norm:
             with torch.no_grad():
                 batch = torch.stack([r.detach().clamp(min=1e-8) for r in raws])
-                if bool((self.run_mean == 1).all()):
+                if bool((self.run_mean == 1).all().item()):
                     self.run_mean.copy_(batch)  # first-batch snapshot seed
                 else:
                     self.run_mean.mul_(1 - self.norm_momentum).add_(

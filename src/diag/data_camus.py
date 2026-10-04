@@ -9,9 +9,8 @@ Deviation record (also written to mlflow tags by callers):
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -25,7 +24,7 @@ def load_patient(
     root: Path = PROCESSED,
     frames: int = 10,
     size: int = 256,
-) -> dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor | str]:
     """Load one patient clip: images (T,1,1,H,W) float[0,1], masks (T,1,1,H,W) 0/1."""
     imgs = sorted((root / "img" / pid).glob("*.png"))[:frames]
     gts = sorted((root / "gt_lv" / pid).glob("*.png"))[:frames]

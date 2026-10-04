@@ -13,12 +13,12 @@ from pathlib import Path
 import mlflow
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score
+
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.ds_head import DsHead
@@ -42,7 +42,6 @@ def load_clip(pid: str):
 
 def main():
     import json
-    import subprocess
     torch.manual_seed(0)
     split = json.loads(Path("/tmp/camus_split.json").read_text())
     test_ids = split["test_data"][:N_PAT]
@@ -63,7 +62,7 @@ def main():
     else:
         print("WARN: ckpt lacks ds_head (pre-fix run); ds at init 1.0", flush=True)
 
-    def infer(x, dts):
+    def infer(x: torch.Tensor, dts: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor, dict[str, dict[str, torch.Tensor]]]:
         with torch.no_grad():
             feats = [anchor(f) for f in x]
             f_tf = torch.stack([o["F_tf"] for o in feats])
@@ -94,7 +93,7 @@ def main():
         for key, idx in (("p1", torch.linspace(0, 9, 5).round().long()),
                          ("p2", torch.linspace(0, 9, 3).round().long())):
             xs, gs = x[idx], gt[idx]
-            dd = dts[idx[1:] - 1] if False else torch.ones(len(idx) - 1)
+            _dd = dts[idx[1:] - 1] if False else torch.ones(len(idx) - 1)
             pr, _, _ = infer(xs, None)
             acc[key].append(float(dice_score(pr, gs).mean()) / max(base, 1e-9))
         # P3 70% drop (keep 3)

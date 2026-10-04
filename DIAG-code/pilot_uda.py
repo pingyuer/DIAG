@@ -18,6 +18,7 @@ from PIL import Image
 sys.path.insert(0, "src")
 sys.path.insert(0, "DIAG-code")
 from diag_metrics import dice_score, hd95
+
 from diag.anchoring import ContentAnchor
 from diag.decoder import CandidateDecoder
 from diag.ds_head import DsHead
@@ -42,7 +43,6 @@ def fetch():
 
 
 def main():
-    import subprocess
     torch.manual_seed(0)
     fetch()
     ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)

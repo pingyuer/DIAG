@@ -49,8 +49,8 @@ from __future__ import annotations
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class AffineGate(nn.Module):
@@ -66,7 +66,7 @@ class AffineGate(nn.Module):
         nn.init.zeros_(self.g_beta.bias)
 
     def forward(
-        self, s_f: torch.Tensor, f_base: torch.Tensor, archive: list | None = None
+        self, s_f: torch.Tensor, f_base: torch.Tensor, archive: list[torch.Tensor] | None = None
     ) -> dict[str, torch.Tensor]:
         """s_f, f_base: (B, C, H, W) single frame (or T*B merged)."""
         hw = f_base.shape[-2:]
@@ -141,7 +141,7 @@ class RegionTokenHead(nn.Module):
 
     def tokens(self, s: torch.Tensor) -> torch.Tensor:
         """s: (B, C, H, W) -> region tokens (B, K, C)."""
-        b, c, h, w = s.shape
+        b, _c, _h, _w = s.shape
         seq = s.flatten(2).transpose(1, 2)  # (B, HW, C)
         # One-sided detach (003 sec.2): direct loss path into S through
         # k/v would drag the dynamics state toward single-frame shortcuts.

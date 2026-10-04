@@ -32,8 +32,8 @@ Why this design works:
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class MaskTokenRecurrence(nn.Module):
@@ -101,7 +101,7 @@ class CandidateDecoder(nn.Module):
         (warped-vs-plain feature shift, promotion criterion 003).
         """
         t, b = f_e.shape[:2]
-        hw = f_e.shape[-2:]
+        _hw = f_e.shape[-2:]
         fused = (f_e + p).flatten(0, 1)  # (TB, C, H, W)
         if phi is not None:
             tb = t * b
@@ -110,7 +110,6 @@ class CandidateDecoder(nn.Module):
                 ph = F.interpolate(ph.permute(0, 3, 1, 2), size=fused.shape[2:],
                                    mode="bilinear", align_corners=False).permute(0, 2, 3, 1)
                 # rescale normalized coords: grid is resolution-independent, keep as is
-                ph = ph
             warped = F.grid_sample(fused, ph, mode="bilinear",
                                    padding_mode="border", align_corners=False)
             delta = float((warped - fused).detach().abs().mean())

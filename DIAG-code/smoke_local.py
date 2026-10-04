@@ -1,7 +1,5 @@
 """本地 CPU smoke：读一小 clip（10 帧 PNG）+ Dummy 指标 + mlflow run 打标 code_sha。"""
-import json
 import sys
-import urllib.request
 from pathlib import Path
 
 import mlflow

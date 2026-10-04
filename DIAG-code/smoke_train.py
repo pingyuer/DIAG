@@ -44,7 +44,7 @@ def main():
     dec = CandidateDecoder(feat_dim=anchor.out_channels, num_queries=4, num_candidates=3)
     loss_fn = DiagLoss()
     frames = sorted(Path("outputs/smoke_sample").glob("*.png"))[:10]
-    gt_frames = sorted(Path("outputs/smoke_sample").glob("*.png"))[:10]
+    _gt_frames = sorted(Path("outputs/smoke_sample").glob("*.png"))[:10]
     clip = torch.stack(
         [torch.from_numpy(np.asarray(Image.open(f))).float().div(255) for f in frames]
     ).unsqueeze(1)
@@ -52,7 +52,7 @@ def main():
     with torch.no_grad():
         gray = clip.squeeze(2)
         gt_full = (gray > gray.mean(dim=(2, 3), keepdim=True)).float().unsqueeze(2)
-    gt_small = torch.nn.functional.interpolate(
+    _gt_small = torch.nn.functional.interpolate(
         gt_full.flatten(0, 1), size=(256, 256), mode="nearest").view(10, 1, 1, 256, 256)
     # decoder outputs at 256 (H/2 features -> 2x up); downsample gt to match
     with torch.no_grad():
