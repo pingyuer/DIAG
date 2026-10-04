@@ -55,14 +55,24 @@ OUT = Path(__import__("os").environ.get("DIAG_OUT", "/root/DIAG/outputs/camus_tr
 MLFLOW_URI = "http://172.16.240.77:5000"
 
 
-def load_patient(p: str):
+_CACHE: dict[str, tuple] = {}
+
+
+def load_patient(p: str, cache: bool = True):
+    # RAM cache: PIL decode (61ms/clip) happens ONCE per run, not per epoch.
+    # 400 train clips x 10 x 256px float32 = ~1GB, fits easily.
+    if cache and p in _CACHE:
+        return _CACHE[p]
     imgs = sorted((DATA / "img" / p).glob("*.png"))[:10]
     gts = sorted((DATA / "gt_lv" / p).glob("*.png"))[:10]
     x = torch.stack([torch.from_numpy(__import__("numpy").asarray(Image.open(f))).float().div(255)
                      for f in imgs]).unsqueeze(1).unsqueeze(1)  # (T,1,1,H,W)
     g = torch.stack([torch.from_numpy(__import__("numpy").asarray(Image.open(f))).float()
                      for f in gts]).unsqueeze(1).unsqueeze(1)
-    return x, (g > 0.5).float()
+    out = (x, (g > 0.5).float())
+    if cache:
+        _CACHE[p] = out
+    return out
 
 
 def main():
@@ -183,7 +193,7 @@ def main():
         tot, dsum, n = 0.0, 0.0, 0
         for p in batch_ids:
             x, g = load_patient(p)
-            x = x.to(dev)
+            x = x.to(dev, non_blocking=True)
             g_small = F.interpolate(g.flatten(0, 1), size=(256, 256), mode="nearest").view(10, 1, 1, 256, 256).to(dev)
             if train:
                 opt.zero_grad()
