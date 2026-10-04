@@ -71,7 +71,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sweep", action="store_true", help="threshold sweep 0.30-0.75 on probs")
     ap.add_argument("--postprocess", action="store_true", help="upstream postprocess on masks")
+    ap.add_argument("--pp-item", default="",
+                    help="006post sec.1: comma list subset of largest,fill_holes,remove_small,closing (default all-on when --postprocess)")
+    ap.add_argument("--pp-min-size", type=int, default=16, help="006post sec.1 min_size sweep")
     ap.add_argument("--anchor", default="unext")
+    ap.add_argument("--tta-flip", action="store_true", help="006post sec.2 hflip TTA (app caliber only)")
+    ap.add_argument("--sweep-split", default="test", help="006post sec.3 val/test (val gate first)")
+    ap.add_argument("--sweep-step", type=float, default=0.05, help="006post sec.3 sweep step")
+    ap.add_argument("--gt-interp", default="nearest", help="006post sec.4 mask interp trace")
+    ap.add_argument("--temporal-average", type=int, default=1, help="006post sec.5 past-window logits avg (1=identity)")
+    ap.add_argument("--noise-sigma", type=float, default=0.0, help="006post sec.6 input noise probe")
     ap.add_argument("--hd95-mirror", action="store_true", dest="mirror",
                     help="report MONAI-mirror HD95 alongside cdist")
     a = ap.parse_args()
@@ -93,6 +102,8 @@ def main():
         x = torch.stack([torch.from_numpy(np.array(Image.open(f))).float().div(255) for f in imgs]).unsqueeze(1).unsqueeze(1)
         g = torch.stack([torch.from_numpy(np.array(Image.open(f))).float() for f in gts]).unsqueeze(1).unsqueeze(1)
         g = (g > 0.5).float()
+        if a.noise_sigma > 0:
+            x = (x + torch.randn_like(x) * a.noise_sigma).clamp(0, 1)
         with torch.no_grad():
             feats = [anchor(f) for f in x]
             f_tf = torch.stack([o["F_tf"] for o in feats])
@@ -100,14 +111,39 @@ def main():
             pf = pclf.forward(f_tf, f_tc, dts)
             ho = hdc(f_tf, pf["fine"]["states"], pf["coarse"]["states"])
             do = dec(ho["F_e"], ho["P"], ho["Q_e"])
+            if a.tta_flip:
+                # hflip TTA: flip frames, forward, flip back, average logits
+                feats_f = [anchor(torch.flip(f, dims=[-1])) for f in x]
+                f_tf_f = torch.stack([o["F_tf"] for o in feats_f])
+                f_tc_f = torch.stack([o["F_tc"] for o in feats_f])
+                pf_f = pclf.forward(f_tf_f, f_tc_f, dts)
+                ho_f = hdc(f_tf_f, pf_f["fine"]["states"], pf_f["coarse"]["states"])
+                do_f = dec(ho_f["F_e"], ho_f["P"], ho_f["Q_e"])
+                masks_f = torch.flip(do_f["masks"], dims=[-1])
+                masks = (do["masks"] + masks_f) / 2
+            else:
+                masks = do["masks"]
+            if a.temporal_average > 1:
+                # causal past-window logits average (no future leak)
+                k = a.temporal_average
+                pad = masks[:1].expand(k - 1, *masks.shape[1:])
+                ext = torch.cat([pad, masks], dim=0)
+                masks = torch.stack([ext[i - k + 1:i + 1].mean(dim=0)
+                                     for i in range(k - 1, k - 1 + masks.shape[0])])
             sel = do["quality"].argmax(-1).reshape(-1)
-            prob = torch.sigmoid(do["masks"]).reshape(-1, 3, 256, 256)
+            prob = torch.sigmoid(masks).reshape(-1, 3, 256, 256)
             best = prob[torch.arange(sel.shape[0]), sel]
             all_probs.append(best.detach().cpu())
             all_gts.append(g.cpu())
             pred = (best > 0.5).float().view(10, 1, 1, 256, 256)
             if a.postprocess:
-                pred = postprocess_binary_mask(pred)
+                items = [s.strip() for s in a.pp_item.split(",") if s.strip()] or None
+                kw = {} if items is None else {
+                    "keep_largest": "largest" in items,
+                    "fill_holes": "fill_holes" in items,
+                    "remove_small": "remove_small" in items,
+                    "binary_closing": "closing" in items}
+                pred = postprocess_binary_mask(pred, min_size=a.pp_min_size, **kw)
         d = dice_score(pred, g)
         per_frame.append(d)
         per_pid += [pid] * 10
