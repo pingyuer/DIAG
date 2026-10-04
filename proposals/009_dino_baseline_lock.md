@@ -192,11 +192,21 @@ FLAKY，不进 v1.0 锁定表，另起追查任务。R0 全过 → 输出 `mater
 （锁定表 + ckpt md5 + split md5 + seed），后继一切对照以 v1.0 为分母。
 R0-6 是唯一新训练（a1 原第一优先级并入 R0）；R0-7 离线零训练。
 
-## 6. 给 implementation 的落地清单（按序，R0 先行）
+## 6. 给 implementation 的落地清单（队列任务序；本地离线先行）
 
-0. R0-1–R0-5：离线 test 补跑 + 同 ckpt 重跑复核（零训练，先干）。
-1. R0-6（a1）：DINO × ce0.05/rec1.0 全预算双 seed（全树唯一新训练优先）。
-## 7. 对比方法（R0 之后跑；分两类，不混报）
+队列制（`DIAG-code/queue_runner.sh`，hostname-pin，一卡一串行）：
+task 文件 `<host>-<name>.sh` 进 `DIAG-code/queue/pending/` 即入队，
+runner 每轮 `git pull` 自取，无需 ssh。命名：`<host>-r06-dino-s2-s0.sh` 等。
+
+0. R0-1–R0-5 + R0-7：本地离线（CPU 可跑），不占卡，不用排队，先干。
+1. R0-6（a1）：DINO × ce0.05/rec1.0 全预算双 seed——2 个 task，
+   队首（全树唯一新训练优先）。
+2. C2/C3：GDKVM fair + DPFR-fair 复核——2~3 个 task，排 R0-6 后。
+3. b3：ds-lr/smooth 小网格短筛（6 点，短预算）——排对照后。
+4. b1：跳帧响应离线重测（有 `stress_ds_real.py`，零训练）；dts 元数据链路 human。
+5. a3：高分辨 decoder 128（建模项单独立项，本树只登记）。
+6. a2：MedSAM 显存重探（512/384）或文档关闭（二选一）。
+7. 不做：SVF 重启、原型池、scan、J>5、TTA/平滑重跑。
 
 ### 7.1 舱内可跑对照（同 split / 同十帧 / 同口径，imp 直接执行）
 
