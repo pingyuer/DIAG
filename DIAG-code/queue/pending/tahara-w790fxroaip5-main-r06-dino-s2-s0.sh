@@ -1,0 +1,2 @@
+export MLFLOW_TRACKING_URI=http://172.16.240.77:5000 DIAG_OUT=/root/DIAG_fresh/outputs/r06_dinos2_s0
+cd /root/DIAG_fresh && git pull -q && mkdir -p outputs/r06_dinos2_s0 && PYTHONPATH=src:DIAG-code python3 DIAG-code/train_camus.py --epochs 30 --batch 2 --anchor dinov2-small --seed 0 --ds-lr 1e-4 --vf-deep --l-ce 0.05 --l-rec 1.0 --run-name r06-dino-ce005-rec10-s0 > outputs/r06_dinos2_s0/run.log 2>&1

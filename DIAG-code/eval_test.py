@@ -91,6 +91,9 @@ def main():
     ap.add_argument("--hd95-mirror", action="store_true", dest="mirror",
                     help="report MONAI-mirror HD95 alongside cdist")
     a = ap.parse_args()
+    split_key = {"test": "test_data", "val": "val_data"}[a.sweep_split]
+    test_ids = split[split_key]
+    print(f"split={a.sweep_split} ids={split_key} n={len(test_ids)}", flush=True)
 
     DATA.mkdir(parents=True, exist_ok=True)
     dts = torch.ones(9)
@@ -220,8 +223,9 @@ def main():
         P = torch.cat(all_probs)  # (500,256,256)
         G = torch.cat(all_gts).squeeze(1).squeeze(1)  # (500,256,256)
         assert P.shape == G.shape, (P.shape, G.shape)
-        rows = []
-        for th in (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75):
+        import numpy as _np
+        ths = [round(float(x), 2) for x in _np.arange(0.30, 0.751, a.sweep_step)]
+        for th in ths:
             dth = float(dice_score((P > th).float(), G).mean())
             rows.append((th, dth))
             print(f"th={th:.2f} dice={dth:.4f}", flush=True)
