@@ -143,8 +143,8 @@ def main():
             ei = int(es_idx[pi])
             es_d.append(float(dice_score((P_all[pi * 10 + ei : pi * 10 + ei + 1] > 0.5).float(), G_all[pi * 10 + ei : pi * 10 + ei + 1]).mean()))
             es_n += 1
-            a = float(areas[pi].mean())
-            if a < 4100:  # small cavity (bottom quartile, ~4060px on 256px)
+            _a = float(areas[pi].mean())
+            if _a < 4100:  # small cavity (bottom quartile, ~4060px on 256px)
                 small_d.append(float(dice_score((P_all[pi * 10 : (pi + 1) * 10] > 0.5).float(), G_all[pi * 10 : (pi + 1) * 10]).mean()))
                 small_n += 1
         # boundary band: dilate GT edge x2, score only inside band
