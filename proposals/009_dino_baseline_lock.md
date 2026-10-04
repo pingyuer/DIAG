@@ -169,12 +169,58 @@ UNeXt 上 +0.26pt/−2.78，DINO 侧零增益（008b 读数）——报数必须
 - **作废追溯**：旧 P4 合成抖动、test 侧择阈、DINO test 反超、closing 主项、
   DINO+1.9pt TTA——五项作废声明永久有效，后继引用即打回。
 
-## 5. 给 implementation 的落地清单（按序）
+## 5. R0 复现批（第一要务：先复现，再探索；§6 原清单后移）
 
-1. a1：DINO × ce0.05/rec1.0 全预算双 seed（全树第一优先级）。
-2. c3：应用口径冻结（min_size 扫 + val 择阈，离线零训练）。
-3. b3：ds-lr/smooth 小网格短筛 + 胜者全预算。
-4. b1：跳帧响应离线重测（`stress_ds_real.py` 现有）+ dts 元数据链路（human）。
-5. a3：高分辨 decoder 128（建模项单独立项，本树只登记）。
-6. a2：MedSAM 显存重探（512/384）或文档关闭（二选一）。
-7. 不做：SVF 重启、原型池、scan、J>5、TTA/平滑重跑。
+动机：§3 表是跨世代拼出来的（DINO test 单 ckpt、s2 跨 seed、FO 对照跨脚本、
+后处理档跨世代）。R0 用 §1 冻结配置 + §4 纪律，把每个格子 locked 重跑一遍，
+输出 baseline v1.0 锁定表。不引入任何新 flag、新结构；纯重跑 + 离线 eval。
+
+复现矩阵（同 split md5 `682f3d89`、裸/应用双口径、seed {0,1} 双跑处已标）：
+
+| # | 配置 | 现状 | R0 动作 | 验收数 |
+|---|---|---|---|---|
+| R0-1 | UNeXt-FO 双 seed | val 0.8025（s0），test 0.8078 | s1 test 补跑 + 双 seed test 对照 | test 裸 Dice/HD95 双 seed |
+| R0-2 | UNeXt grid1 ON 双 seed | val 0.9120/0.9100，test 仅 s0 | s1 test 补跑（ckpt 已有 `grid1_s1_best.pt`） | test 裸 + 切片三件双 seed |
+| R0-3 | UNeXt s2（ce0.05/rec1.0）双 seed | val 0.9163/0.9175，test 仅 s1 | s0 test 补跑（ckpt 已有 `s2full_s0_best.pt`） | test 裸 + mirror 双 seed |
+| R0-4 | DINO-FO 双 seed | val 0.8928（s0）/0.8955（best），test 0.8876 | s1 FO test 补跑 + val s1 确认 | FO 分母双 seed 落定 |
+| R0-5 | DINO-full 双 seed | val 0.9188/0.9216，test 裸 0.9082/0.9085 | 同 ckpt 重跑复核（幂等性）+ 切片三件补齐 | 重跑差 <0.001 即锁定 |
+| R0-6 | DINO × ce0.05/rec1.0（a1） | 从未跑过 | 全预算双 seed 新跑（唯一新训练） | val/test 双口径 + mirror |
+| R0-7 | 后处理应用口径 | largest 主项（UNeXt），DINO 零增益 | min_size {8,16,32,64} + val 择阈（val 齐性先查），离线 | 冻结应用口径文档 v1.0 |
+
+判定：R0 任一格重跑差 >0.5pt（同 ckpt）或 >1pt（同配置双 seed 内）→ 该格标
+FLAKY，不进 v1.0 锁定表，另起追查任务。R0 全过 → 输出 `materials/baseline_v10.md`
+（锁定表 + ckpt md5 + split md5 + seed），后继一切对照以 v1.0 为分母。
+R0-6 是唯一新训练（a1 原第一优先级并入 R0）；R0-7 离线零训练。
+
+## 6. 给 implementation 的落地清单（按序，R0 先行）
+
+0. R0-1–R0-5：离线 test 补跑 + 同 ckpt 重跑复核（零训练，先干）。
+1. R0-6（a1）：DINO × ce0.05/rec1.0 全预算双 seed（全树唯一新训练优先）。
+## 7. 对比方法（R0 之后跑；分两类，不混报）
+
+### 7.1 舱内可跑对照（同 split / 同十帧 / 同口径，imp 直接执行）
+
+| # | 方法 | 入口 | 现状 | R0 后动作 |
+|---|---|---|---|---|
+| C1 | frame-only（UNeXt-FO / DINO-FO） | `train_camus.py --frame-only` + ckpt | R0-1/R0-4 落定分母 | H1 分母，必报 |
+| C2 | GDKVM | `upstream_BanditPM/configs/gdkvm_{echo,camus}_fair_*.yaml`（舱内现成） | 未跑 | 同 split/mask 对齐重跑，记 Dice/HD95 |
+| C3 | DPFR-fair | 同上 `dpfr_*fair*.yaml` | test 0.9348 既有数（006 引） | 同口径复核一行，确认数有效 |
+| C4 | dies/dice 退化链 | J=1、detach-OFF（格 2 已有）、smooth-OFF | 部分有数 | 补齐 Table 2 式消融行 |
+
+公平粒度（upstream README 既有约束延续）：同 split、同可见 clip、
+同 `label_valid` 监督帧、同 foreground Dice 定义、logits 对齐到目标 mask
+尺寸再计分。内部时序机制可不同，测试协议与 metric 空间必须固定。
+
+### 7.2 舱外引用对照（只引论文数，不跑；method 章 Related Work 用）
+
+| 方法 | 出处 | 取数 | 说明 |
+|---|---|---|---|
+| MemSAM | CVPR 2024（Deng et al.）| 论文 CAMUS/EchoNet 行 | SAM+时空记忆，prompted 方法参照；代码链路未确认，只引数 |
+| GDKVM | ICCV 2025（Wang et al.，[github](https://github.com/wangrui2025/GDKVM)）| 论文四域行 | Eq.1 式共享状态的实例，我方立论反面；数引论文，跑用舱内 C2 |
+| OSA | arXiv:2603.26188（Stiefel 流形正交状态更新） | 论文行 | 流形约束一派的最近参照，与我方对角群形成"弱群 vs 强流形"对照叙事 |
+| EchoNet-Dynamic 官方基线 | [echonet/dynamic](https://github.com/echonet/dynamic)（DeeplabV3 系） | 开源数 | 数据集发布方基线，Adult 域必引 |
+| DyL-UNet / MSSNet-Mamba | arXiv:2509.19052 / PMID 42202178 | 论文行 | 时序一致性 + Mamba 两条近期线，只引数不断言可比 |
+
+规则：舱外数一律标"论文引用数（协议未对齐）"，禁与舱内裸口径并表；
+并表只允许 C1–C4 + R0-6（a1）同协议行。Method 章 related 按"配准派 /
+解耦派 / FiLM 派 / 记忆派（GDKVM/MemSAM）"四派写，DIAG 定位见 001 §2。
