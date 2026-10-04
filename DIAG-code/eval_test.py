@@ -129,6 +129,37 @@ def main():
     print(f"patient-avg dice={float(per_pat_dice.mean()):.4f}", flush=True)
     print(f"first-frame dice={float(torch.stack([per_frame[i][0].mean() for i in range(n_pat)]).mean()):.4f}", flush=True)
     print(f"last-frame dice={float(torch.stack([per_frame[i][-1].mean() for i in range(n_pat)]).mean()):.4f}", flush=True)
+    # 008-2 hard slices: ES-proxy (min-area frame) / small-cavity / boundary band.
+    # Full-mean saturates at 0.91; slices separate the pack.
+    es_d, small_d, band_d, es_n, small_n = [], [], [], 0, 0
+    for i in range(n_pat):
+        pass  # filled below (needs probs+gts per patient; see all_probs/all_gts)
+    P_all = torch.cat(all_probs) if all_probs else None
+    G_all = torch.cat(all_gts).squeeze(1).squeeze(1) if all_gts else None
+    if P_all is not None:
+        areas = G_all.reshape(-1, 10, 256, 256).sum(dim=(2, 3))  # (P,10)
+        es_idx = areas.argmin(dim=1)
+        for pi in range(n_pat):
+            ei = int(es_idx[pi])
+            es_d.append(float(dice_score((P_all[pi * 10 + ei : pi * 10 + ei + 1] > 0.5).float(), G_all[pi * 10 + ei : pi * 10 + ei + 1]).mean()))
+            es_n += 1
+            a = float(areas[pi].mean())
+            if a < 4100:  # small cavity (bottom quartile, ~4060px on 256px)
+                small_d.append(float(dice_score((P_all[pi * 10 : (pi + 1) * 10] > 0.5).float(), G_all[pi * 10 : (pi + 1) * 10]).mean()))
+                small_n += 1
+        # boundary band: dilate GT edge x2, score only inside band
+        import torch.nn.functional as _F
+        Gb = G_all.reshape(-1, 1, 256, 256)
+        dil = _F.max_pool2d(Gb, 5, stride=1, padding=2)
+        ero = 1 - _F.max_pool2d(1 - Gb, 5, stride=1, padding=2)
+        band = ((dil - ero) > 0).float()
+        Pb = (P_all.reshape(-1, 1, 256, 256) > 0.5).float()
+        inter = (Pb * band * Gb).sum()
+        union = ((Pb * band).sum() + (band * Gb).sum()).clamp(min=1e-6)
+        band_dice = float(2 * inter / union)
+        print(f"ES-proxy dice={float(sum(es_d) / max(es_n, 1)):.4f} n={es_n}", flush=True)
+        print(f"small-cavity dice={float(sum(small_d) / max(small_n, 1)):.4f} n={small_n}", flush=True)
+        print(f"boundary-band dice={band_dice:.4f}", flush=True)
     # R3: split md5 + seed tags for rerun lock
     import hashlib
     split_md5 = hashlib.md5(Path("/tmp/camus_split.json").read_bytes()).hexdigest()[:8] \
