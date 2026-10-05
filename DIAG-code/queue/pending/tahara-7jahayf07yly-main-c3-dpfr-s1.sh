@@ -1,0 +1,3 @@
+export MLFLOW_TRACKING_URI=http://172.16.240.77:5000 DATASETS_ROOT=/input0
+git config --global --add safe.directory /root/DIAG_fresh/upstream_BanditPM 2>/dev/null; rm -rf /root/DIAG_fresh/upstream_BanditPM && tar xzf /tmp/upstream.tgz -C /root/DIAG_fresh && cd /root/DIAG_fresh/upstream_BanditPM && python3 train.py --config-name=dpfr_camus_fair_dense10 seed=1 model.dpfr.mask_prompt_train.use_gt=false mlflow.experiment_name=dpfr-fair mlflow.run_name=dpfr-fair-s1 +mlflow.tags.prompt_free=true mlflow.preflight=false > /root/DIAG_fresh/outputs/queue-c3-dpfr-s1.log 2>&1
+echo "dpfr-s1:"; grep -aE "Test.*Iter=4000|test/dice" /root/DIAG_fresh/outputs/queue-c3-dpfr-s1.log | tail -2 | cut -c1-150
