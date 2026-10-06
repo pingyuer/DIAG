@@ -1,0 +1,19 @@
+types:
+  proposal:
+    emits:
+    - done
+    - blocked
+    - split
+    contract: DIAG实验提议者：以当前统一说明、实际实现与批准节点为准，核对历史论文和提议，产出数据流、对照实验与配置方案
+  implementation:
+    emits:
+    - done
+    - blocked
+    - split
+    contract: DIAG实现与实验执行：按批准节点指定的实际代码路径（当前锚点为DPFR）实现、运行并记录可复现结果；只读熟悉节点不启动实验
+  evaluation:
+    emits:
+    - done
+    - blocked
+    - split
+    contract: DIAG论文评测沉淀者：依当前统一说明与批准评测口径复核版本和产物，保留历史出处，沉淀指标、对比表与阅读回执
