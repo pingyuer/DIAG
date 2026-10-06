@@ -1,0 +1,3 @@
+export MLFLOW_TRACKING_URI=http://172.16.240.77:5000 DATASETS_ROOT=/input0
+git config --global --add safe.directory /root/DIAG_fresh/upstream_BanditPM 2>/dev/null; rm -rf /root/DIAG_fresh/upstream_BanditPM && tar xzf /tmp/upstream.tgz -C /root/DIAG_fresh && cd /root/DIAG_fresh/upstream_BanditPM && python3 train.py --config-name=dpfr_camus_fair_dense10 seed=0 model.dpfr.ablate_mode=meanpool model.dpfr.mask_prompt_train.use_gt=false mlflow.experiment_name=diag-011 mlflow.run_name=011b-meanpool-s0 +mlflow.tags.group=B mlflow.preflight=false save=1 save_weights_interval=4000 > /root/DIAG_fresh/outputs/queue-011b-s0.log 2>&1
+echo "011b-s0:"; grep -aE "Test.*Iter=4000" /root/DIAG_fresh/outputs/queue-011b-s0.log | tail -1 | cut -c1-150
