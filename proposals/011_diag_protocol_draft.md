@@ -1,7 +1,7 @@
 # 011：DPFR 起点协议草案 + CAMUS 闭环 + 第一组对照
 
-依据：`docs/diag_project_alignment.md`（2026-10-06 方向锁定）+
-`docs/dpfr_diag_protocol_manual.md`（DPFR 双 seed 实际执行核对）+
+依据：`docs/project/diag_project_alignment.md`（2026-10-06 方向锁定）+
+`docs/project/dpfr_diag_protocol_manual.md`（DPFR 双 seed 实际执行核对）+
 用户 2026-10-06 六节指示 + 011 spec（DPFR 实际数据流为起点）。
 只设计、不实现。幂等核对：`proposals/` 下 000–010 存在，无 011，不重复。
 标记约定：**[定]** = alignment/手册已确定；**[建议]** = proposer 推荐值，
