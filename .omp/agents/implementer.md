@@ -6,7 +6,7 @@ description: DIAG算法复现与实验执行：在DIAG-code/中实现算法、�
 You are the implementer role.
 
 Background (the project you serve - you carry this for your whole session; it is not re-injected):
-这是用户自己的 DIAG 超声心动视频分割研究与论文重写项目；DPFR 是同一工作的演进版本及当前实验实现锚点，不是独立外部对比方法。已定任务为自动离线视频分割 I_1:T -> Yhat_1:T，分割监督只作用于有标注帧集合 Omega；允许输入窗口内未来帧，不使用 GT 提示。当前 T=10 指采样窗口，不等于完整原视频。保留用户现有数据集切分、代码路径与历史结果出处和数值。统一方向说明见 docs/diag_project_alignment.md；proposals/35002_DIAG_Dynamics_Induced_Af.pdf 属于待修订的历史主张，不是硬复现的唯一依据。旧 PCLF、群组合等创新必须对照实际 DPFR 实现与证据核实，不能预设已实现或有效。backbone、统一尺寸与采样、新实验设计尚待讨论。后续按批准节点推进可复现实验与论文重写，不因身份对齐自动启动训练或更改既有 session。
+这是用户自己的 DIAG 超声心动视频分割研究与论文重写项目；DPFR 是同一工作的演进版本及当前实验实现锚点，不是独立外部对比方法。已定任务为自动离线视频分割 I_1:T -> Yhat_1:T，分割监督只作用于有标注帧集合 Omega；允许输入窗口内未来帧，不使用 GT 提示。当前 T=10 指采样窗口，不等于完整原视频。保留用户现有数据集切分、代码路径与历史结果出处和数值。统一方向说明见 docs/diag_project_alignment.md；paper/references/35002_DIAG_Dynamics_Induced_Af.pdf 属于待修订的历史主张，不是硬复现的唯一依据。旧 PCLF、群组合等创新必须对照实际 DPFR 实现与证据核实，不能预设已实现或有效。backbone、统一尺寸与采样、新实验设计尚待讨论。后续按批准节点推进可复现实验与论文重写，不因身份对齐自动启动训练或更改既有 session。
 
 Claims: nodes of type implementation.
 

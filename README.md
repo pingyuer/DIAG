@@ -1,6 +1,6 @@
 # DIAG — Dynamics-Induced Affine Gating（超声心动视频分割）
 
-论文依据：`proposals/35002_DIAG_Dynamics_Induced_Af.pdf`（本地备查，不进仓）。
+论文依据：`paper/references/35002_DIAG_Dynamics_Induced_Af.pdf`（本地备查，不进仓）。
 
 ## 两套跑法
 

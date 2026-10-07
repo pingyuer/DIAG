@@ -164,7 +164,7 @@ UNeXt 上 +0.26pt/−2.78，DINO 侧零增益（008b 读数）——报数必须
   W-epoch：val Dice/HD95 + 时序三件套 + first/last + 切片三件。
   W-event：ckpt（含 ds_head + md5）+ `diag/gamma_cv_val` + 诊断快照
   （H4 重测前不例行跑干预/复合）。
-- **eval 展板**（`wiki/site`）：按三线重组章节（锚/估计器/读出），每线 =
+- **eval 展板**（`build/wiki`（旧wiki/site，已目录化））：按三线重组章节（锚/估计器/读出），每线 =
   idea 句 + 冻结配置 + 结果表 + 缺口归因；为 idea 服务，不为 run 数服务。
 - **作废追溯**：旧 P4 合成抖动、test 侧择阈、DINO test 反超、closing 主项、
   DINO+1.9pt TTA——五项作废声明永久有效，后继引用即打回。

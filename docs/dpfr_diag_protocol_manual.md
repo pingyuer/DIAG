@@ -364,4 +364,4 @@ GT 与预测都为空时，Dice 定义为 1；仅一个为空时 Dice 为 0。HD
 | 训练循环与最终测试 | [_legacy_train.py](../upstream_BanditPM/src/gdkvm_project/cli/_legacy_train.py) |
 | DIAG 预测校正 | [pclf.py](../src/diag/pclf.py) |
 | DIAG 监督目标 | [losses.py](../src/diag/losses.py) |
-| DIAG 论文 | [论文 PDF](../proposals/35002_DIAG_Dynamics_Induced_Af.pdf) |
+| DIAG 论文 | [论文 PDF](../paper/references/35002_DIAG_Dynamics_Induced_Af.pdf) |

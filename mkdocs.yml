@@ -1,0 +1,23 @@
+docs_dir: build/docs-staging
+site_name: DIAG 实验 wiki
+theme:
+  name: material
+  features: [navigation.tabs, navigation.sections, toc.follow, search.suggest]
+  palette: [{scheme: default, primary: indigo, accent: indigo}]
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+markdown_extensions:
+  - pymdownx.arithmatex: {generic: true}
+nav:
+   - 总览: index.md
+   - 锚线: line_anchor.md
+   - 估计器线: line_estimator.md
+   - 读出线: line_readout.md
+   - Baseline v1.0: baseline.md
+   - 舱内外对照: compare_table.md
+   - 流程纪律: discipline.md
+   - 有效Runs: runs.md
+   - 实验地图: map.md
+   - 推导: [建模总表: modeling.md, 实现明细: implementation.md, 模块速览: design.md]
+   - 历史归档: [主旨P1-P10: mission.md, H2/H4动力学: node1_dynamics.md, H3/边界读出: node2_boundary.md, 监督与纪律: node3_opt.md, 旧进展看板: framework.md, 论文数字参照: repro_map.md, 旧管线: pipeline.md]
+   - 附录: [env_bringup.md, anchoring_eq5.md, pclf_eq69.md, hdc_eq1015.md, train_eq1617.md, integration_001.md, overfit_1clip.md, fullchain_camus30.md, dualrun_h1.md, grid1_lock.md, eval_grid2.md, eval_grid3.md, eval_grid4.md, eval_vf.md, eval_stage2.md, eval_008.md, eval_008b.md, eval_008b2.md, eval_008c.md, eval_post6.md, eval_r0.md, eval_lint.md, eval_queue.md, eval_queue2.md, windows_002.md, metrics_diag.md, eval_004.md, hd95_align.md, restructure_003.md, svf_grid.md, lambda_grid.md, opt_005.md, repo_converge.md, github_push.md, proposals/000_diag_paper_parse.md, proposals/001_diag_innovations.md, proposals/002_mlflow_windows.md, proposals/003_ds_detach_svf.md, proposals/004_stress_svf_agg_domain.md, proposals/005_backbone_opt.md, proposals/006_decoupling_matrix.md, proposals/006_post_eval.md, proposals/007_pipeline_cleanup.md, proposals/009_dino_baseline_lock.md, proposals/010_paper_compare.md]
