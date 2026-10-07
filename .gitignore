@@ -25,8 +25,7 @@ checkpoints/
 *.pth
 .code_sha
 
-# 工作台件：本地保留，不进仓（容器不pull）
-/materials/
+# 工作台件保全（S1, 2026-10-07）：materials进仓
 /proposals/000_diag_paper_parse.md
 /proposals/001_diag_innovations.md
 /proposals/002_mlflow_windows.md
